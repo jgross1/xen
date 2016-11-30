@@ -89,6 +89,13 @@ multiboot2_header_start:
                    0, /* Number of the lines - no preference. */ \
                    0  /* Number of bits per pixel - no preference. */
 
+        /* Inhibit bootloader from calling ExitBootServices(). */
+        mb2ht_init MB2_HT(EFI_BS), MB2_HT(OPTIONAL)
+
+        /* EFI64 entry point. */
+        mb2ht_init MB2_HT(ENTRY_ADDRESS_EFI64), MB2_HT(OPTIONAL), \
+                   sym_phys(__efi64_start)
+
         /* Multiboot2 header end tag. */
         mb2ht_init MB2_HT(END), MB2_HT(REQUIRED)
 .Lmultiboot2_header_end:
@@ -100,20 +107,48 @@ multiboot2_header_start:
 gdt_boot_descr:
         .word   6*8-1
         .long   sym_phys(trampoline_gdt)
+        .long   0 /* Needed for 64-bit lgdt */
+
+        .align 4
+vga_text_buffer:
+        .long   0xb8000
+
+efi_platform:
+        .byte   0
 
 .Lbad_cpu_msg: .asciz "ERR: Not a 64-bit CPU!"
 .Lbad_ldr_msg: .asciz "ERR: Not a Multiboot bootloader!"
+.Lbad_ldr_nbs: .asciz "ERR: Bootloader shutdown EFI x64 boot services!"
+.Lbad_ldr_nst: .asciz "ERR: EFI SystemTable is not provided by bootloader!"
+.Lbad_ldr_nih: .asciz "ERR: EFI ImageHandle is not provided by bootloader!"
+.Lbad_efi_msg: .asciz "ERR: EFI IA-32 platforms are not supported!"
 
         .section .init.text, "ax", @progbits
 
 bad_cpu:
         mov     $(sym_phys(.Lbad_cpu_msg)),%esi # Error message
-        jmp     print_err
+        jmp     .Lget_vtb
 not_multiboot:
         mov     $(sym_phys(.Lbad_ldr_msg)),%esi # Error message
-print_err:
-        mov     $0xB8000,%edi  # VGA framebuffer
-1:      mov     (%esi),%bl
+        jmp     .Lget_vtb
+.Lmb2_no_st:
+        mov     $(sym_phys(.Lbad_ldr_nst)),%esi # Error message
+        jmp     .Lget_vtb
+.Lmb2_no_ih:
+        mov     $(sym_phys(.Lbad_ldr_nih)),%esi # Error message
+        jmp     .Lget_vtb
+.Lmb2_no_bs:
+        mov     $(sym_phys(.Lbad_ldr_nbs)),%esi # Error message
+        xor     %edi,%edi                       # No VGA text buffer
+        jmp     .Lsend_chr
+.Lmb2_efi_ia_32:
+        mov     $(sym_phys(.Lbad_efi_msg)),%esi # Error message
+        xor     %edi,%edi                       # No VGA text buffer
+        jmp     .Lsend_chr
+.Lget_vtb:
+        mov     sym_phys(vga_text_buffer),%edi
+.Lsend_chr:
+        mov     (%esi),%bl
         test    %bl,%bl        # Terminate on '\0' sentinel
         je      .Lhalt
         mov     $0x3f8+5,%dx   # UART Line Status Register
@@ -123,12 +158,185 @@ print_err:
         mov     $0x3f8+0,%dx   # UART Transmit Holding Register
         mov     %bl,%al
         out     %al,%dx        # Send a character over the serial line
-        movsb                  # Write a character to the VGA framebuffer
+        test    %edi,%edi      # Is the VGA text buffer available?
+        jz      .Lsend_chr
+        movsb                  # Write a character to the VGA text buffer
         mov     $7,%al
-        stosb                  # Write an attribute to the VGA framebuffer
-        jmp     1b
+        stosb                  # Write an attribute to the VGA text buffer
+        jmp     .Lsend_chr
 .Lhalt: hlt
         jmp     .Lhalt
+
+        .code64
+
+__efi64_start:
+        cld
+
+        /* VGA is not available on EFI platforms. */
+        movl   $0,vga_text_buffer(%rip)
+
+        /* Check for Multiboot2 bootloader. */
+        cmp     $MULTIBOOT2_BOOTLOADER_MAGIC,%eax
+        je      .Lefi_multiboot2_proto
+
+        /* Jump to not_multiboot after switching CPU to x86_32 mode. */
+        lea     not_multiboot(%rip),%edi
+        jmp     x86_32_switch
+
+.Lefi_multiboot2_proto:
+        /* Zero EFI SystemTable and EFI ImageHandle addresses. */
+        xor     %esi,%esi
+        xor     %edi,%edi
+
+        /* Skip Multiboot2 information fixed part. */
+        lea     (MB2_fixed_sizeof+MULTIBOOT2_TAG_ALIGN-1)(%rbx),%ecx
+        and     $~(MULTIBOOT2_TAG_ALIGN-1),%ecx
+
+.Lefi_mb2_tsize:
+        /* Check Multiboot2 information total size. */
+        mov     %ecx,%r8d
+        sub     %ebx,%r8d
+        cmp     %r8d,MB2_fixed_total_size(%rbx)
+        jbe     run_bs
+
+        /* Are EFI boot services available? */
+        cmpl    $MULTIBOOT2_TAG_TYPE_EFI_BS,MB2_tag_type(%rcx)
+        jne     .Lefi_mb2_st
+
+        /* We are on EFI platform and EFI boot services are available. */
+        incb    efi_platform(%rip)
+
+        /*
+         * Disable real mode and other legacy stuff which should not
+         * be run on EFI platforms.
+         */
+        incb    skip_realmode(%rip)
+        jmp     .Lefi_mb2_next_tag
+
+.Lefi_mb2_st:
+        /* Get EFI SystemTable address from Multiboot2 information. */
+        cmpl    $MULTIBOOT2_TAG_TYPE_EFI64,MB2_tag_type(%rcx)
+        cmove   MB2_efi64_st(%rcx),%rsi
+        je      .Lefi_mb2_next_tag
+
+        /* Get EFI ImageHandle address from Multiboot2 information. */
+        cmpl    $MULTIBOOT2_TAG_TYPE_EFI64_IH,MB2_tag_type(%rcx)
+        cmove   MB2_efi64_ih(%rcx),%rdi
+        je      .Lefi_mb2_next_tag
+
+        /* Is it the end of Multiboot2 information? */
+        cmpl    $MULTIBOOT2_TAG_TYPE_END,MB2_tag_type(%rcx)
+        je      run_bs
+
+.Lefi_mb2_next_tag:
+        /* Go to next Multiboot2 information tag. */
+        add     MB2_tag_size(%rcx),%ecx
+        add     $(MULTIBOOT2_TAG_ALIGN-1),%ecx
+        and     $~(MULTIBOOT2_TAG_ALIGN-1),%ecx
+        jmp     .Lefi_mb2_tsize
+
+run_bs:
+        /* Are EFI boot services available? */
+        cmpb    $0,efi_platform(%rip)
+        jnz     0f
+
+        /* Jump to .Lmb2_no_bs after switching CPU to x86_32 mode. */
+        lea     .Lmb2_no_bs(%rip),%edi
+        jmp     x86_32_switch
+
+0:
+        /* Is EFI SystemTable address provided by boot loader? */
+        test    %rsi,%rsi
+        jnz     1f
+
+        /* Jump to .Lmb2_no_st after switching CPU to x86_32 mode. */
+        lea     .Lmb2_no_st(%rip),%edi
+        jmp     x86_32_switch
+
+1:
+        /* Is EFI ImageHandle address provided by boot loader? */
+        test    %rdi,%rdi
+        jnz     2f
+
+        /* Jump to .Lmb2_no_ih after switching CPU to x86_32 mode. */
+        lea     .Lmb2_no_ih(%rip),%edi
+        jmp     x86_32_switch
+
+2:
+        push    %rax
+        push    %rdi
+
+        /*
+         * Initialize BSS (no nasty surprises!).
+         * It must be done earlier than in BIOS case
+         * because efi_multiboot2() touches it.
+         */
+        lea     __bss_start(%rip),%edi
+        lea     __bss_end(%rip),%ecx
+        sub     %edi,%ecx
+        shr     $3,%ecx
+        xor     %eax,%eax
+        rep stosq
+
+        pop     %rdi
+
+        /*
+         * efi_multiboot2() is called according to System V AMD64 ABI:
+         *   - IN: %rdi - EFI ImageHandle, %rsi - EFI SystemTable,
+         *   - OUT: %rax - highest usable memory address below 1 MiB;
+         *                 memory above this address is reserved for trampoline;
+         *                 memory below this address is used as a storage for
+         *                 mbi struct created in reloc().
+         *
+         * MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO tag is not provided
+         * on EFI platforms. Hence, it could not be used like
+         * on legacy BIOS platforms.
+         */
+        call    efi_multiboot2
+
+        /* Convert memory address to bytes/16 and store it in safe place. */
+        shr     $4,%eax
+        mov     %eax,%ecx
+
+        pop     %rax
+
+        /* Jump to trampoline_setup after switching CPU to x86_32 mode. */
+        lea     trampoline_setup(%rip),%edi
+
+x86_32_switch:
+        cli
+
+        /* Initialize GDTR. */
+        lgdt    gdt_boot_descr(%rip)
+
+        /* Reload code selector. */
+        pushq   $BOOT_CS32
+        lea     cs32_switch(%rip),%edx
+        push    %rdx
+        lretq
+
+        .code32
+
+cs32_switch:
+        /* Initialize basic data segments. */
+        mov     $BOOT_DS,%edx
+        mov     %edx,%ds
+        mov     %edx,%es
+        mov     %edx,%ss
+        /* %esp is initialized later. */
+
+        /* Load null descriptor to unused segment registers. */
+        xor     %edx,%edx
+        mov     %edx,%fs
+        mov     %edx,%gs
+
+        /* Disable paging. */
+        mov     %cr0,%edx
+        and     $(~X86_CR0_PG),%edx
+        mov     %edx,%cr0
+
+        /* Jump to earlier loaded address. */
+        jmp     *%edi
 
 __start:
         cld
@@ -157,7 +365,7 @@ __start:
 
         /* Not available? BDA value will be fine. */
         cmovnz  MB_mem_lower(%ebx),%edx
-        jmp     trampoline_setup
+        jmp     trampoline_bios_setup
 
 .Lmultiboot2_proto:
         /* Skip Multiboot2 information fixed part. */
@@ -169,24 +377,33 @@ __start:
         mov     %ecx,%edi
         sub     %ebx,%edi
         cmp     %edi,MB2_fixed_total_size(%ebx)
-        jbe     trampoline_setup
+        jbe     trampoline_bios_setup
 
         /* Get mem_lower from Multiboot2 information. */
         cmpl    $MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO,MB2_tag_type(%ecx)
         cmove   MB2_mem_lower(%ecx),%edx
-        je      trampoline_setup
+        je      .Lmb2_next_tag
+
+        /* EFI IA-32 platforms are not supported. */
+        cmpl    $MULTIBOOT2_TAG_TYPE_EFI32,MB2_tag_type(%ecx)
+        je      .Lmb2_efi_ia_32
+
+        /* Bootloader shutdown EFI x64 boot services. */
+        cmpl    $MULTIBOOT2_TAG_TYPE_EFI64,MB2_tag_type(%ecx)
+        je      .Lmb2_no_bs
 
         /* Is it the end of Multiboot2 information? */
         cmpl    $MULTIBOOT2_TAG_TYPE_END,MB2_tag_type(%ecx)
-        je      trampoline_setup
+        je      trampoline_bios_setup
 
+.Lmb2_next_tag:
         /* Go to next Multiboot2 information tag. */
         add     MB2_tag_size(%ecx),%ecx
         add     $(MULTIBOOT2_TAG_ALIGN-1),%ecx
         and     $~(MULTIBOOT2_TAG_ALIGN-1),%ecx
         jmp     .Lmb2_tsize
 
-trampoline_setup:
+trampoline_bios_setup:
         /* Set up trampoline segment 64k below EBDA */
         movzwl  0x40e,%ecx          /* EBDA segment */
         cmp     $0xa000,%ecx        /* sanity check (high) */
@@ -202,16 +419,19 @@ trampoline_setup:
          * multiboot structure (if available) and use the smallest.
          */
         cmp     $0x100,%edx         /* is the multiboot value too small? */
-        jb      2f                  /* if so, do not use it */
+        jb      trampoline_setup    /* if so, do not use it */
         shl     $10-4,%edx
         cmp     %ecx,%edx           /* compare with BDA value */
         cmovb   %edx,%ecx           /* and use the smaller */
 
-2:      /* Reserve 64kb for the trampoline */
+        /* Reserve 64kb for the trampoline. */
         sub     $0x1000,%ecx
 
         /* From arch/x86/smpboot.c: start_eip had better be page-aligned! */
         xor     %cl, %cl
+
+trampoline_setup:
+        /* Save trampoline address for later use. */
         shl     $4, %ecx
         mov     %ecx,sym_phys(trampoline_phys)
 
@@ -223,7 +443,14 @@ trampoline_setup:
         call    reloc
         mov     %eax,sym_phys(multiboot_ptr)
 
-        /* Initialize BSS (no nasty surprises!) */
+        /*
+         * Do not zero BSS on EFI platform here.
+         * It was initialized earlier.
+         */
+        cmpb    $0,sym_phys(efi_platform)
+        jnz     1f
+
+        /* Initialize BSS (no nasty surprises!). */
         mov     $sym_phys(__bss_start),%edi
         mov     $sym_phys(__bss_end),%ecx
         sub     %edi,%ecx
@@ -231,6 +458,7 @@ trampoline_setup:
         shr     $2,%ecx
         rep stosl
 
+1:
         /* Interrogate CPU extended features via CPUID. */
         mov     $0x80000000,%eax
         cpuid
@@ -282,8 +510,13 @@ trampoline_setup:
         cmp     $sym_phys(__trampoline_seg_stop),%edi
         jb      1b
 
+        /* Do not parse command line on EFI platform here. */
+        cmpb    $0,sym_phys(efi_platform)
+        jnz     1f
+
         call    cmdline_parse_early
 
+1:
         /* Switch to low-memory stack.  */
         mov     sym_phys(trampoline_phys),%edi
         lea     0x10000(%edi),%esp
