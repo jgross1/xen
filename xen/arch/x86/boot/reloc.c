@@ -25,20 +25,9 @@ asm (
     "    jmp  reloc                    \n"
     );
 
-typedef unsigned int u32;
-typedef unsigned long long u64;
-
+#include "defs.h"
 #include "../../../include/xen/multiboot.h"
 #include "../../../include/xen/multiboot2.h"
-
-#define NULL		((void *)0)
-
-#define __stdcall	__attribute__((__stdcall__))
-
-#define ALIGN_UP(arg, align) \
-                (((arg) + (align) - 1) & ~((typeof(arg))(align) - 1))
-
-#define _p(val)		((void *)(unsigned long)(val))
 
 #define get_mb2_data(tag, type, member)   (((multiboot2_tag_##type##_t *)(tag))->member)
 #define get_mb2_string(tag, type, member) ((u32)get_mb2_data(tag, type, member))

@@ -514,6 +514,13 @@ trampoline_setup:
         cmpb    $0,sym_phys(efi_platform)
         jnz     1f
 
+        /* Bail if there is no command line to parse. */
+        mov     sym_phys(multiboot_ptr),%ebx
+        testl   $MBI_CMDLINE,MB_flags(%ebx)
+        jz      1f
+
+        pushl   $sym_phys(early_boot_opts)
+        pushl   MB_cmdline(%ebx)
         call    cmdline_parse_early
 
 1:
@@ -532,6 +539,7 @@ trampoline_setup:
         /* Jump into the relocated trampoline. */
         lret
 
+cmdline_parse_early:
 #include "cmdline.S"
 
 reloc:
