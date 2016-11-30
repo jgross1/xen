@@ -146,6 +146,8 @@ static void __init efi_arch_process_memory_map(EFI_SYSTEM_TABLE *SystemTable,
 {
     struct e820entry *e;
     unsigned int i;
+    /* Check for extra mem for mbi data if Xen is loaded via multiboot2 protocol. */
+    UINTN extra_mem = efi_enabled(EFI_LOADER) ? 0 : (64 << 10);
 
     /* Populate E820 table and check trampoline area availability. */
     e = e820map - 1;
@@ -168,7 +170,8 @@ static void __init efi_arch_process_memory_map(EFI_SYSTEM_TABLE *SystemTable,
             /* fall through */
         case EfiConventionalMemory:
             if ( !trampoline_phys && desc->PhysicalStart + len <= 0x100000 &&
-                 len >= cfg.size && desc->PhysicalStart + len > cfg.addr )
+                 len >= cfg.size + extra_mem &&
+                 desc->PhysicalStart + len > cfg.addr )
                 cfg.addr = (desc->PhysicalStart + len - cfg.size) & PAGE_MASK;
             /* fall through */
         case EfiLoaderCode:
@@ -210,12 +213,14 @@ static void *__init efi_arch_allocate_mmap_buffer(UINTN map_size)
 
 static void __init efi_arch_pre_exit_boot(void)
 {
-    if ( !trampoline_phys )
-    {
-        if ( !cfg.addr )
-            blexit(L"No memory for trampoline");
+    if ( trampoline_phys )
+        return;
+
+    if ( !cfg.addr )
+        blexit(L"No memory for trampoline");
+
+    if ( efi_enabled(EFI_LOADER) )
         relocate_trampoline(cfg.addr);
-    }
 }
 
 static void __init noreturn efi_arch_post_exit_boot(void)
@@ -652,6 +657,43 @@ static bool_t __init efi_arch_use_config_file(EFI_SYSTEM_TABLE *SystemTable)
 }
 
 static void efi_arch_flush_dcache_area(const void *vaddr, UINTN size) { }
+
+paddr_t __init efi_multiboot2(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+{
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
+    UINTN cols, gop_mode = ~0, rows;
+
+    __set_bit(EFI_BOOT, &efi_flags);
+    __set_bit(EFI_RS, &efi_flags);
+
+    efi_init(ImageHandle, SystemTable);
+
+    efi_console_set_mode();
+
+    if ( StdOut->QueryMode(StdOut, StdOut->Mode->Mode,
+                           &cols, &rows) == EFI_SUCCESS )
+        efi_arch_console_init(cols, rows);
+
+    gop = efi_get_gop();
+
+    if ( gop )
+        gop_mode = efi_find_gop_mode(gop, 0, 0, 0);
+
+    efi_arch_edd();
+    efi_arch_cpu();
+
+    efi_tables();
+    setup_efi_pci();
+    efi_variables();
+
+    if ( gop )
+        efi_set_gop_mode(gop, gop_mode);
+
+    efi_exit_boot(ImageHandle, SystemTable);
+
+    /* Return highest usable memory address below 1 MiB. */
+    return cfg.addr;
+}
 
 /*
  * Local variables:
