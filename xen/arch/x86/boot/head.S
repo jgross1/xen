@@ -12,9 +12,9 @@
         .text
         .code32
 
-#define sym_phys(sym)     ((sym) - __XEN_VIRT_START)
-#define sym_esi(sym)      sym_phys(sym)(%esi)
-#define sym_fs(sym)       %fs:sym_phys(sym)
+#define sym_offs(sym)     ((sym) - __XEN_VIRT_START)
+#define sym_esi(sym)      sym_offs(sym)(%esi)
+#define sym_fs(sym)       %fs:sym_offs(sym)
 
 #define BOOT_CS32        0x0008
 #define BOOT_CS64        0x0010
@@ -97,7 +97,7 @@ multiboot2_header_start:
 
         /* EFI64 entry point. */
         mb2ht_init MB2_HT(ENTRY_ADDRESS_EFI64), MB2_HT(OPTIONAL), \
-                   sym_phys(__efi64_start)
+                   sym_offs(__efi64_start)
 
         /* Multiboot2 header end tag. */
         mb2ht_init MB2_HT(END), MB2_HT(REQUIRED)
@@ -110,7 +110,7 @@ multiboot2_header_start:
 gdt_boot_descr:
         .word   7*8-1
 gdt_boot_base:
-        .long   sym_phys(trampoline_gdt)
+        .long   sym_offs(trampoline_gdt)
         .long   0 /* Needed for 64-bit lgdt */
 
         .align 4
@@ -130,23 +130,23 @@ efi_platform:
         .section .init.text, "ax", @progbits
 
 bad_cpu:
-        add     $sym_phys(.Lbad_cpu_msg),%esi   # Error message
+        add     $sym_offs(.Lbad_cpu_msg),%esi   # Error message
         jmp     .Lget_vtb
 not_multiboot:
-        add     $sym_phys(.Lbad_ldr_msg),%esi   # Error message
+        add     $sym_offs(.Lbad_ldr_msg),%esi   # Error message
         jmp     .Lget_vtb
 .Lmb2_no_st:
-        add     $sym_phys(.Lbad_ldr_nst),%esi   # Error message
+        add     $sym_offs(.Lbad_ldr_nst),%esi   # Error message
         jmp     .Lget_vtb
 .Lmb2_no_ih:
-        add     $sym_phys(.Lbad_ldr_nih),%esi   # Error message
+        add     $sym_offs(.Lbad_ldr_nih),%esi   # Error message
         jmp     .Lget_vtb
 .Lmb2_no_bs:
-        add     $sym_phys(.Lbad_ldr_nbs),%esi   # Error message
+        add     $sym_offs(.Lbad_ldr_nbs),%esi   # Error message
         xor     %edi,%edi                       # No VGA text buffer
         jmp     .Lsend_chr
 .Lmb2_efi_ia_32:
-        add     $sym_phys(.Lbad_efi_msg),%esi   # Error message
+        add     $sym_offs(.Lbad_efi_msg),%esi   # Error message
         xor     %edi,%edi                       # No VGA text buffer
         jmp     .Lsend_chr
 .Lget_vtb:
@@ -354,7 +354,7 @@ __start:
         cli
 
         /* Load default Xen image load base address. */
-        mov     $sym_phys(__image_base__),%esi
+        mov     $sym_offs(__image_base__),%esi
 
         /* Bootloaders may set multiboot{1,2}.mem_lower to a nonzero value. */
         xor     %edx,%edx
@@ -505,8 +505,8 @@ trampoline_setup:
         jnz     1f
 
         /* Initialize BSS (no nasty surprises!). */
-        mov     $sym_phys(__bss_start),%edi
-        mov     $sym_phys(__bss_end),%ecx
+        mov     $sym_offs(__bss_start),%edi
+        mov     $sym_offs(__bss_end),%ecx
         push    %fs
         pop     %es
         sub     %edi,%ecx
@@ -579,22 +579,22 @@ trampoline_setup:
 
         /* Apply relocations to bootstrap trampoline. */
         mov     sym_fs(trampoline_phys),%edx
-        mov     $sym_phys(__trampoline_rel_start),%edi
+        mov     $sym_offs(__trampoline_rel_start),%edi
 1:
         mov     %fs:(%edi),%eax
         add     %edx,%fs:(%edi,%eax)
         add     $4,%edi
-        cmp     $sym_phys(__trampoline_rel_stop),%edi
+        cmp     $sym_offs(__trampoline_rel_stop),%edi
         jb      1b
 
         /* Patch in the trampoline segment. */
         shr     $4,%edx
-        mov     $sym_phys(__trampoline_seg_start),%edi
+        mov     $sym_offs(__trampoline_seg_start),%edi
 1:
         mov     %fs:(%edi),%eax
         mov     %dx,%fs:(%edi,%eax)
         add     $4,%edi
-        cmp     $sym_phys(__trampoline_seg_stop),%edi
+        cmp     $sym_offs(__trampoline_seg_stop),%edi
         jb      1b
 
         /* Do not parse command line on EFI platform here. */
@@ -620,7 +620,7 @@ trampoline_setup:
         push    %eax
 
         /* Copy bootstrap trampoline to low memory, below 1MB. */
-        mov     $sym_phys(trampoline_start),%esi
+        mov     $sym_offs(trampoline_start),%esi
         mov     $((trampoline_end - trampoline_start) / 4),%ecx
         rep movsl %fs:(%esi),%es:(%edi)
 
