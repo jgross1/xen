@@ -594,9 +594,9 @@ int libxl_domain_preserve(libxl_ctx *ctx, uint32_t domid,
     return 0;
 }
 
-static void xcinfo2xlinfo(libxl_ctx *ctx,
-                          const xc_domaininfo_t *xcinfo,
-                          libxl_dominfo *xlinfo)
+void xcinfo2xlinfo(libxl_ctx *ctx,
+                   const xc_domaininfo_t *xcinfo,
+                   libxl_dominfo *xlinfo)
 {
     size_t size;
 
@@ -4342,9 +4342,9 @@ out_no_transaction:
 }
 
 /* out_target_memkb and out_max_memkb can be NULL */
-static int libxl__get_memory_target(libxl__gc *gc, uint32_t domid,
-                                    uint64_t *out_target_memkb,
-                                    uint64_t *out_max_memkb)
+int libxl__get_memory_target(libxl__gc *gc, uint32_t domid,
+                             uint64_t *out_target_memkb,
+                             uint64_t *out_max_memkb)
 {
     int rc;
     char *target = NULL, *static_max = NULL, *endptr = NULL;
