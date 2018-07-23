@@ -2432,6 +2432,29 @@ int xc_domain_soft_reset(xc_interface *xch,
     domctl.domain = domid;
     return do_domctl(xch, &domctl);
 }
+
+int xc_set_domain_parameters(xc_interface *xch, uint32_t domid, char *params)
+{
+    int ret, len = strlen(params);
+    DECLARE_DOMCTL;
+    DECLARE_HYPERCALL_BOUNCE(params, len, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+
+    if ( xc_hypercall_bounce_pre(xch, params) )
+        return -1;
+
+    domctl.cmd = XEN_DOMCTL_set_parameter;
+    domctl.domain = domid;
+    set_xen_guest_handle(domctl.u.set_parameter.params, params);
+    domctl.u.set_parameter.size = len;
+    memset(domctl.u.set_parameter.pad, 0, sizeof(domctl.u.set_parameter.pad));
+
+    ret = do_domctl(xch, &domctl);
+
+    xc_hypercall_bounce_post(xch, params);
+
+    return ret;
+}
+
 /*
  * Local variables:
  * mode: C

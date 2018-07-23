@@ -1108,6 +1108,15 @@ int xc_domain_set_gnttab_limits(xc_interface *xch, uint32_t domid,
                                 uint32_t grant_frames,
                                 uint32_t maptrack_frames);
 
+/**
+ * Set generic domain parameters.
+ *
+ * @parm xch a handle to an open hypervisor interface
+ * @parm domid id of the domain
+ * @parm params parameter string to be passed to the hypervisor
+ */
+int xc_set_domain_parameters(xc_interface *xch, uint32_t domid, char *params);
+
 /*
  * CPUPOOL MANAGEMENT FUNCTIONS
  */
@@ -1204,6 +1213,15 @@ int xc_cpupool_movedomain(xc_interface *xch,
  * return cpumap array on success, NULL else
  */
 xc_cpumap_t xc_cpupool_freeinfo(xc_interface *xch);
+
+/**
+ * Set generic cpupool parameters.
+ *
+ * @parm xch a handle to an open hypervisor interface
+ * @parm poolid id of the cpupool
+ * @parm params parameter string to be passed to the hypervisor
+ */
+int xc_set_cpupool_parameters(xc_interface *xch, uint32_t poolid, char *params);
 
 /*
  * EVENT CHANNEL FUNCTIONS

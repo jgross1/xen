@@ -217,3 +217,26 @@ out:
     xc_hypercall_buffer_free(xch, local);
     return cpumap;
 }
+
+int xc_set_cpupool_parameters(xc_interface *xch, uint32_t poolid, char *params)
+{
+    int ret, len = strlen(params);
+    DECLARE_SYSCTL;
+    DECLARE_HYPERCALL_BOUNCE(params, len, XC_HYPERCALL_BUFFER_BOUNCE_IN);
+
+    if ( xc_hypercall_bounce_pre(xch, params) )
+        return -1;
+
+    sysctl.cmd = XEN_SYSCTL_set_parameter;
+    set_xen_guest_handle(sysctl.u.set_parameter.params, params);
+    sysctl.u.set_parameter.size = len;
+    sysctl.u.set_parameter.scope = XEN_SYSCTL_SETPAR_SCOPE_CPUPOOL;
+    sysctl.u.set_parameter.pad = 0;
+    sysctl.u.set_parameter.instance = poolid;
+
+    ret = do_sysctl(xch, &sysctl);
+
+    xc_hypercall_bounce_post(xch, params);
+
+    return ret;
+}
