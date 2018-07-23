@@ -54,6 +54,7 @@
 
 #ifndef __ASSEMBLY__
 
+struct cpupool;
 struct domain;
 
 /*
@@ -77,6 +78,7 @@ void do_initcalls(void);
  */
 enum param_scope {
     SCOPE_GLOBAL,
+    SCOPE_CPUPOOL,
     SCOPE_DOMAIN
 };
 
@@ -96,6 +98,7 @@ struct kernel_param {
     union {
         void *var;
         int (*func)(const char *);
+        int (*func_cpupool)(const char *, struct cpupool *);
         int (*func_domain)(const char *, struct domain *);
         int (*call)(const char *, void *);
     } par;
@@ -181,6 +184,26 @@ extern const struct kernel_param __param_start[], __param_end[];
 #define string_runtime_param(_name, _var) \
     string_param(_name, _var); \
     string_runtime_only_param(_name, _var)
+
+#define custom_cpupool_param(_name, _flags, _var) \
+    __rtparam __cpupool_par_##_var = \
+        def_custom_param(_name, SCOPE_CPUPOOL, _flags, func_cpupool, _var)
+#define boolean_cpupool_param(_name, _flags, _var) \
+    __rtparam __cpupool_par_##_var = \
+        def_var_param(_name, OPT_BOOL, SCOPE_CPUPOOL, _flags, \
+                      (struct cpupool *)NULL->_var)
+#define integer_cpupool_param(_name, _flags, _var) \
+    __rtparam __cpupool_par_##_var = \
+        def_var_param(_name, OPT_UINT, SCOPE_CPUPOOL, _flags, \
+                      (struct cpupool *)NULL->_var)
+#define size_cpupool_param(_name, _flags, _var) \
+    __rtparam __cpupool_par_##_var = \
+        def_var_param(_name, OPT_SIZE, SCOPE_CPUPOOL, _flags, \
+                      (struct cpupool *)NULL->_var)
+#define string_cpupool_param(_name, _flags, _var) \
+    __rtparam __cpupool_par_##_var = \
+        def_var_param(_name, OPT_STR, SCOPE_CPUPOOL, _flags, \
+                      (struct cpupool *)NULL->_var)
 
 #define custom_domain_param(_name, _flags, _var) \
     __rtparam __domain_par_##_var = \

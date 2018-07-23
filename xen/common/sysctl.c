@@ -499,6 +499,20 @@ long do_sysctl(XEN_GUEST_HANDLE_PARAM(xen_sysctl_t) u_sysctl)
                 ret = op->u.set_parameter.instance
                       ? -EINVAL : runtime_parse(params);
                 break;
+            case XEN_SYSCTL_SETPAR_SCOPE_CPUPOOL:
+            {
+                struct cpupool *c;
+
+                c = cpupool_get_by_id(op->u.set_parameter.instance);
+                if ( c == NULL )
+                    ret = -ESRCH;
+                else
+                {
+                    ret = cpupool_param_parse(c, params);
+                    cpupool_put(c);
+                }
+                break;
+            }
             default:
                 ret = -EINVAL;
                 break;

@@ -808,6 +808,17 @@ static int __init cpupool_presmp_init(void)
 }
 presmp_initcall(cpupool_presmp_init);
 
+int cpupool_check_parflags(void *instance, unsigned int flags)
+{
+    struct cpupool *c = instance;
+
+    if ( !(flags & PARAM_FLAG_RUNTIME) &&
+         ((c->n_dom != 0) || cpumask_weight(c->cpu_valid)) )
+        return -EBUSY;
+
+    return 0;
+}
+
 /*
  * Local variables:
  * mode: C

@@ -68,10 +68,12 @@
 
 #define reserve_bootmem(_p,_l) ((void)0)
 
+struct cpupool;
 struct domain;
 
 void cmdline_parse(const char *cmdline);
 int runtime_parse(const char *line);
+int cpupool_param_parse(struct cpupool *c, const char *line);
 int domain_param_parse(struct domain *d, const char *line);
 int parse_bool(const char *s, const char *e);
 
