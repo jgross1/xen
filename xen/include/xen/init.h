@@ -73,6 +73,10 @@ void do_initcalls(void);
 /*
  * Used for kernel command line parameter setup
  */
+enum param_scope {
+    SCOPE_GLOBAL
+};
+
 struct kernel_param {
     const char *name;
     enum {
@@ -83,9 +87,11 @@ struct kernel_param {
         OPT_CUSTOM
     } type;
     unsigned int len;
+    enum param_scope scope;
     union {
         void *var;
         int (*func)(const char *);
+        int (*call)(const char *, void *);
     } par;
 };
 
@@ -101,54 +107,56 @@ extern const struct kernel_param __param_start[], __param_end[];
     __attribute__((__aligned__(1))) char
 #define __kparam          __param(__initsetup)
 
-#define def_custom_param(_name, _func) \
+#define def_custom_param(_name, _scope, _func) \
     { .name = _name, \
       .type = OPT_CUSTOM, \
+      .scope = _scope, \
       .par.func = _func }
-#define def_var_param(_name, _type, _var) \
+#define def_var_param(_name, _type, _scope, _var) \
     { .name = _name, \
       .type = _type, \
       .len = sizeof(_var), \
+      .scope = _scope, \
       .par.var = &_var }
 
 #define custom_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_custom_param(__setup_str_##_var, _var)
+        def_custom_param(__setup_str_##_var, SCOPE_GLOBAL, _var)
 #define boolean_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_var_param(__setup_str_##_var, OPT_BOOL, _var)
+        def_var_param(__setup_str_##_var, OPT_BOOL, SCOPE_GLOBAL, _var)
 #define integer_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_var_param(__setup_str_##_var, OPT_UINT, _var)
+        def_var_param(__setup_str_##_var, OPT_UINT, SCOPE_GLOBAL, _var)
 #define size_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_var_param(__setup_str_##_var, OPT_SIZE, _var)
+        def_var_param(__setup_str_##_var, OPT_SIZE, SCOPE_GLOBAL, _var)
 #define string_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_var_param(__setup_str_##_var, OPT_STR, _var)
+        def_var_param(__setup_str_##_var, OPT_STR, SCOPE_GLOBAL, _var)
 
 #define __rtparam         __param(__dataparam)
 
 #define custom_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_custom_param(_name, _var)
+        def_custom_param(_name, SCOPE_GLOBAL, _var)
 #define boolean_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_var_param(_name, OPT_BOOL, _var)
+        def_var_param(_name, OPT_BOOL, SCOPE_GLOBAL, _var)
 #define integer_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_var_param(_name, OPT_UINT, _var)
+        def_var_param(_name, OPT_UINT, SCOPE_GLOBAL, _var)
 #define size_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_var_param(_name, OPT_SIZE, _var)
+        def_var_param(_name, OPT_SIZE, SCOPE_GLOBAL, _var)
 #define string_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_var_param(_name, OPT_STR, _var)
+        def_var_param(_name, OPT_STR, SCOPE_GLOBAL, _var)
 
 #define custom_runtime_param(_name, _var) \
     custom_param(_name, _var); \

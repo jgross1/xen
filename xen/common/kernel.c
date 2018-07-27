@@ -19,6 +19,7 @@
 #ifndef COMPAT
 
 struct parse_data {
+    enum param_scope scope;
     const struct kernel_param *start;
     const struct kernel_param *end;
 };
@@ -28,27 +29,28 @@ enum system_state system_state = SYS_STATE_early_boot;
 xen_commandline_t saved_cmdline;
 static const char __initconst opt_builtin_cmdline[] = CONFIG_CMDLINE;
 
-static int assign_integer_param(const struct kernel_param *param, uint64_t val)
+static int assign_integer_param(const struct kernel_param *param,
+                                void *ptr, uint64_t val)
 {
     switch ( param->len )
     {
     case sizeof(uint8_t):
         if ( val > UINT8_MAX && val < (uint64_t)INT8_MIN )
             return -EOVERFLOW;
-        *(uint8_t *)param->par.var = val;
+        *(uint8_t *)ptr = val;
         break;
     case sizeof(uint16_t):
         if ( val > UINT16_MAX && val < (uint64_t)INT16_MIN )
             return -EOVERFLOW;
-        *(uint16_t *)param->par.var = val;
+        *(uint16_t *)ptr = val;
         break;
     case sizeof(uint32_t):
         if ( val > UINT32_MAX && val < (uint64_t)INT32_MIN )
             return -EOVERFLOW;
-        *(uint32_t *)param->par.var = val;
+        *(uint32_t *)ptr = val;
         break;
     case sizeof(uint64_t):
-        *(uint64_t *)param->par.var = val;
+        *(uint64_t *)ptr = val;
         break;
     default:
         BUG();
@@ -57,7 +59,8 @@ static int assign_integer_param(const struct kernel_param *param, uint64_t val)
     return 0;
 }
 
-static int parse_params(const char *cmdline, const struct parse_data *data)
+static int parse_params(const char *cmdline, const struct parse_data *data,
+                        void *instance)
 {
     char opt[128], *optval, *optkey, *q;
     const char *p = cmdline, *key;
@@ -108,6 +111,10 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
         {
             int rctmp;
             const char *s;
+            void *ptr;
+
+            if ( param->scope != data->scope )
+                continue;
 
             if ( strcmp(param->name, optkey) )
             {
@@ -117,7 +124,7 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
                 {
                     found = true;
                     optval[-1] = '=';
-                    rctmp = param->par.func(q);
+                    rctmp = param->par.call(q, instance);
                     optval[-1] = '\0';
                     if ( !rc )
                         rc = rctmp;
@@ -127,14 +134,15 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
 
             rctmp = 0;
             found = true;
+            ptr = (void *)((uint64_t)param->par.var + (uint64_t)instance);
             switch ( param->type )
             {
             case OPT_STR:
-                strlcpy(param->par.var, optval, param->len);
+                strlcpy(ptr, optval, param->len);
                 break;
             case OPT_UINT:
                 rctmp = assign_integer_param(
-                    param,
+                    param, ptr,
                     simple_strtoll(optval, &s, 0));
                 if ( *s )
                     rctmp = -EINVAL;
@@ -146,11 +154,11 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
                 if ( !rctmp )
                     bool_assert = !bool_assert;
                 rctmp = 0;
-                assign_integer_param(param, bool_assert);
+                assign_integer_param(param, ptr, bool_assert);
                 break;
             case OPT_SIZE:
                 rctmp = assign_integer_param(
-                    param,
+                    param, ptr,
                     parse_size_and_unit(optval, &s));
                 if ( *s )
                     rctmp = -EINVAL;
@@ -164,7 +172,7 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
                     safe_strcpy(opt, "no");
                     optval = opt;
                 }
-                rctmp = param->par.func(optval);
+                rctmp = param->par.call(optval, instance);
                 break;
             default:
                 BUG();
@@ -192,23 +200,25 @@ static int parse_params(const char *cmdline, const struct parse_data *data)
 }
 
 static const struct parse_data boot_parse_data = {
+    .scope  = SCOPE_GLOBAL,
     .start  = __setup_start,
     .end    = __setup_end,
 };
 
 static const struct parse_data runtime_parse_data = {
+    .scope  = SCOPE_GLOBAL,
     .start  = __param_start,
     .end    = __param_end,
 };
 
 static void __init _cmdline_parse(const char *cmdline)
 {
-    parse_params(cmdline, &boot_parse_data);
+    parse_params(cmdline, &boot_parse_data, NULL);
 }
 
 int runtime_parse(const char *line)
 {
-    return parse_params(line, &runtime_parse_data);
+    return parse_params(line, &runtime_parse_data, NULL);
 }
 
 /**
