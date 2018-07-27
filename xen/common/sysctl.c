@@ -471,8 +471,7 @@ long do_sysctl(XEN_GUEST_HANDLE_PARAM(xen_sysctl_t) u_sysctl)
 #define XEN_SET_PARAMETER_MAX_SIZE 1023
         char *params;
 
-        if ( op->u.set_parameter.pad[0] || op->u.set_parameter.pad[1] ||
-             op->u.set_parameter.pad[2] )
+        if ( op->u.set_parameter.pad )
         {
             ret = -EINVAL;
             break;
@@ -494,7 +493,16 @@ long do_sysctl(XEN_GUEST_HANDLE_PARAM(xen_sysctl_t) u_sysctl)
         else
         {
             params[op->u.set_parameter.size] = 0;
-            ret = runtime_parse(params);
+            switch ( op->u.set_parameter.scope )
+            {
+            case XEN_SYSCTL_SETPAR_SCOPE_GLOBAL:
+                ret = op->u.set_parameter.instance
+                      ? -EINVAL : runtime_parse(params);
+                break;
+            default:
+                ret = -EINVAL;
+                break;
+            }
         }
 
         xfree(params);

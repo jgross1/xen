@@ -36,7 +36,7 @@
 #include "physdev.h"
 #include "tmem.h"
 
-#define XEN_SYSCTL_INTERFACE_VERSION 0x00000011
+#define XEN_SYSCTL_INTERFACE_VERSION 0x00000012
 
 /*
  * Read console content from Xen buffer ring.
@@ -1055,12 +1055,18 @@ struct xen_sysctl_livepatch_op {
  * Parameters are a single string terminated by a NUL byte of max. size
  * characters. Multiple settings can be specified by separating them
  * with blanks.
+ * Scope can be either global (like boot parameters) or cpupool.
  */
 
 struct xen_sysctl_set_parameter {
     XEN_GUEST_HANDLE_64(char) params;       /* IN: pointer to parameters. */
     uint16_t size;                          /* IN: size of parameters. */
-    uint16_t pad[3];                        /* IN: MUST be zero. */
+    uint8_t  scope;                         /* IN: scope of parameters. */
+#define XEN_SYSCTL_SETPAR_SCOPE_GLOBAL   0
+#define XEN_SYSCTL_SETPAR_SCOPE_CPUPOOL  1
+    uint8_t  pad;                           /* IN: MUST be zero. */
+    uint32_t instance;                      /* IN: scope global: must be zero */
+                                            /*     scope cpupool: cpupool id */
 };
 
 struct xen_sysctl {

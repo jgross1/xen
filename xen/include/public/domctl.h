@@ -38,7 +38,7 @@
 #include "hvm/save.h"
 #include "memory.h"
 
-#define XEN_DOMCTL_INTERFACE_VERSION 0x00000010
+#define XEN_DOMCTL_INTERFACE_VERSION 0x00000011
 
 /*
  * NB. xen_domctl.domain is an IN/OUT parameter for this operation.
@@ -1095,6 +1095,22 @@ struct xen_domctl_vuart_op {
                                  */
 };
 
+/*
+ * XEN_DOMCTL_set_parameter
+ *
+ * Change domain parameters at runtime.
+ * The input string is parsed similar to the boot parameters.
+ * Parameters are a single string terminated by a NUL byte of max. size
+ * characters. Multiple settings can be specified by separating them
+ * with blanks.
+ */
+
+struct xen_domctl_set_parameter {
+    XEN_GUEST_HANDLE_64(char) params;       /* IN: pointer to parameters. */
+    uint16_t size;                          /* IN: size of parameters. */
+    uint16_t pad[3];                        /* IN: MUST be zero. */
+};
+
 struct xen_domctl {
     uint32_t cmd;
 #define XEN_DOMCTL_createdomain                   1
@@ -1174,6 +1190,7 @@ struct xen_domctl {
 #define XEN_DOMCTL_soft_reset                    79
 #define XEN_DOMCTL_set_gnttab_limits             80
 #define XEN_DOMCTL_vuart_op                      81
+#define XEN_DOMCTL_set_parameter                 82
 #define XEN_DOMCTL_gdbsx_guestmemio            1000
 #define XEN_DOMCTL_gdbsx_pausevcpu             1001
 #define XEN_DOMCTL_gdbsx_unpausevcpu           1002
@@ -1236,6 +1253,7 @@ struct xen_domctl {
         struct xen_domctl_psr_alloc         psr_alloc;
         struct xen_domctl_set_gnttab_limits set_gnttab_limits;
         struct xen_domctl_vuart_op          vuart_op;
+        struct xen_domctl_set_parameter     set_parameter;
         uint8_t                             pad[128];
     } u;
 };

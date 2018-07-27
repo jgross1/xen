@@ -199,7 +199,9 @@ int xc_set_parameters(xc_interface *xch, char *params)
     sysctl.cmd = XEN_SYSCTL_set_parameter;
     set_xen_guest_handle(sysctl.u.set_parameter.params, params);
     sysctl.u.set_parameter.size = len;
-    memset(sysctl.u.set_parameter.pad, 0, sizeof(sysctl.u.set_parameter.pad));
+    sysctl.u.set_parameter.scope = XEN_SYSCTL_SETPAR_SCOPE_GLOBAL;
+    sysctl.u.set_parameter.pad = 0;
+    sysctl.u.set_parameter.instance = 0;
 
     ret = do_sysctl(xch, &sysctl);
 

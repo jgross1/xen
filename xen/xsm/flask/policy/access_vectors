@@ -252,6 +252,8 @@ class domain2
     set_gnttab_limits
 # XENMEM_resource_map
     resource_map
+# XEN_DOMCTL_set_parameter
+    set_parameter
 }
 
 # Similar to class domain, but primarily contains domctls related to HVM domains
