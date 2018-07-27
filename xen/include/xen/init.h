@@ -101,72 +101,54 @@ extern const struct kernel_param __param_start[], __param_end[];
     __attribute__((__aligned__(1))) char
 #define __kparam          __param(__initsetup)
 
+#define def_custom_param(_name, _func) \
+    { .name = _name, \
+      .type = OPT_CUSTOM, \
+      .par.func = _func }
+#define def_var_param(_name, _type, _var) \
+    { .name = _name, \
+      .type = _type, \
+      .len = sizeof(_var), \
+      .par.var = &_var }
+
 #define custom_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { .name = __setup_str_##_var, \
-          .type = OPT_CUSTOM, \
-          .par.func = _var }
+        def_custom_param(__setup_str_##_var, _var)
 #define boolean_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { .name = __setup_str_##_var, \
-          .type = OPT_BOOL, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(__setup_str_##_var, OPT_BOOL, _var)
 #define integer_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { .name = __setup_str_##_var, \
-          .type = OPT_UINT, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(__setup_str_##_var, OPT_UINT, _var)
 #define size_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { .name = __setup_str_##_var, \
-          .type = OPT_SIZE, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(__setup_str_##_var, OPT_SIZE, _var)
 #define string_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { .name = __setup_str_##_var, \
-          .type = OPT_STR, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(__setup_str_##_var, OPT_STR, _var)
 
 #define __rtparam         __param(__dataparam)
 
 #define custom_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-      { .name = _name, \
-          .type = OPT_CUSTOM, \
-          .par.func = _var }
+        def_custom_param(_name, _var)
 #define boolean_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_BOOL, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(_name, OPT_BOOL, _var)
 #define integer_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_UINT, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(_name, OPT_UINT, _var)
 #define size_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_SIZE, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(_name, OPT_SIZE, _var)
 #define string_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_STR, \
-          .len = sizeof(_var), \
-          .par.var = &_var }
+        def_var_param(_name, OPT_STR, _var)
 
 #define custom_runtime_param(_name, _var) \
     custom_param(_name, _var); \
