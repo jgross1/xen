@@ -1140,6 +1140,49 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
                                      op->u.set_gnttab_limits.maptrack_frames);
         break;
 
+    case XEN_DOMCTL_set_parameter:
+    {
+#define XEN_SET_PARAMETER_MAX_SIZE 1023
+        char *params;
+
+        if ( op->u.set_parameter.pad[0] || op->u.set_parameter.pad[1] ||
+             op->u.set_parameter.pad[2] )
+        {
+            ret = -EINVAL;
+            break;
+        }
+        if ( d == current->domain )
+        {
+            ret = -EBUSY;
+            break;
+        }
+        if ( op->u.set_parameter.size > XEN_SET_PARAMETER_MAX_SIZE )
+        {
+            ret = -E2BIG;
+            break;
+        }
+        params = xmalloc_bytes(op->u.set_parameter.size + 1);
+        if ( !params )
+        {
+            ret = -ENOMEM;
+            break;
+        }
+        if ( copy_from_guest(params, op->u.set_parameter.params,
+                             op->u.set_parameter.size) )
+            ret = -EFAULT;
+        else
+        {
+            domain_pause(d);
+            params[op->u.set_parameter.size] = 0;
+            ret = domain_param_parse(d, params);
+            domain_unpause(d);
+        }
+
+        xfree(params);
+
+        break;
+    }
+
     default:
         ret = arch_do_domctl(op, d, u_domctl);
         break;

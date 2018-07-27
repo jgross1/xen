@@ -1616,6 +1616,16 @@ int continue_hypercall_on_cpu(
     return 0;
 }
 
+int domain_check_parflags(void *instance, unsigned int flags)
+{
+    struct domain *d = instance;
+
+    if ( !(flags & PARAM_FLAG_RUNTIME) && d->creation_finished )
+         return -EBUSY;
+
+    return arch_domain_check_parflags(d, flags);
+}
+
 /*
  * Local variables:
  * mode: C

@@ -68,6 +68,9 @@ int arch_domain_soft_reset(struct domain *d);
 
 void arch_p2m_set_access_required(struct domain *d, bool access_required);
 
+int domain_check_parflags(void *instance, unsigned int flags);
+int arch_domain_check_parflags(struct domain *d, unsigned int flags);
+
 int arch_set_info_guest(struct vcpu *, vcpu_guest_context_u);
 void arch_get_info_guest(struct vcpu *, vcpu_guest_context_u);
 

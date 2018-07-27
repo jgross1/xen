@@ -2103,6 +2103,10 @@ static int __init init_vcpu_kick_softirq(void)
 }
 __initcall(init_vcpu_kick_softirq);
 
+int arch_domain_check_parflags(struct domain *d, unsigned int flags)
+{
+    return 0;
+}
 
 /*
  * Local variables:

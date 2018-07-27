@@ -222,6 +222,13 @@ static const struct parse_data runtime_parse_data = {
     .end    = __param_end,
 };
 
+static const struct parse_data domain_parse_data = {
+    .scope = SCOPE_DOMAIN,
+    .start = __param_start,
+    .end   = __param_end,
+    .check = domain_check_parflags,
+};
+
 static void __init _cmdline_parse(const char *cmdline)
 {
     parse_params(cmdline, &boot_parse_data, NULL);
@@ -230,6 +237,11 @@ static void __init _cmdline_parse(const char *cmdline)
 int runtime_parse(const char *line)
 {
     return parse_params(line, &runtime_parse_data, NULL);
+}
+
+int domain_param_parse(struct domain *d, const char *line)
+{
+    return parse_params(line, &domain_parse_data, d);
 }
 
 /**

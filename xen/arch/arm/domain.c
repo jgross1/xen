@@ -1011,6 +1011,11 @@ void vcpu_kick(struct vcpu *vcpu)
     }
 }
 
+int arch_domain_check_parflags(struct domain *d, unsigned int flags)
+{
+    return 0;
+}
+
 /*
  * Local variables:
  * mode: C

@@ -54,6 +54,8 @@
 
 #ifndef __ASSEMBLY__
 
+struct domain;
+
 /*
  * Used for initialization calls..
  */
@@ -74,7 +76,8 @@ void do_initcalls(void);
  * Used for kernel command line parameter setup
  */
 enum param_scope {
-    SCOPE_GLOBAL
+    SCOPE_GLOBAL,
+    SCOPE_DOMAIN
 };
 
 struct kernel_param {
@@ -93,6 +96,7 @@ struct kernel_param {
     union {
         void *var;
         int (*func)(const char *);
+        int (*func_domain)(const char *, struct domain *);
         int (*call)(const char *, void *);
     } par;
 };
@@ -109,12 +113,12 @@ extern const struct kernel_param __param_start[], __param_end[];
     __attribute__((__aligned__(1))) char
 #define __kparam          __param(__initsetup)
 
-#define def_custom_param(_name, _scope, _flags, _func) \
+#define def_custom_param(_name, _scope, _flags, _ptr, _func) \
     { .name = _name, \
       .type = OPT_CUSTOM, \
       .scope = _scope, \
       .flags = _flags, \
-      .par.func = _func }
+      .par._ptr = _func }
 #define def_var_param(_name, _type, _scope, _flags, _var) \
     { .name = _name, \
       .type = _type, \
@@ -126,7 +130,7 @@ extern const struct kernel_param __param_start[], __param_end[];
 #define custom_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        def_custom_param(__setup_str_##_var, SCOPE_GLOBAL, 0, _var)
+        def_custom_param(__setup_str_##_var, SCOPE_GLOBAL, 0, func, _var)
 #define boolean_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
@@ -148,7 +152,7 @@ extern const struct kernel_param __param_start[], __param_end[];
 
 #define custom_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
-        def_custom_param(_name, SCOPE_GLOBAL, 0, _var)
+        def_custom_param(_name, SCOPE_GLOBAL, 0, func, _var)
 #define boolean_runtime_only_param(_name, _var) \
     __rtparam __rtpar_##_var = \
         def_var_param(_name, OPT_BOOL, SCOPE_GLOBAL, 0, _var)
@@ -177,6 +181,26 @@ extern const struct kernel_param __param_start[], __param_end[];
 #define string_runtime_param(_name, _var) \
     string_param(_name, _var); \
     string_runtime_only_param(_name, _var)
+
+#define custom_domain_param(_name, _flags, _var) \
+    __rtparam __domain_par_##_var = \
+        def_custom_param(_name, SCOPE_DOMAIN, _flags, func_domain, _var)
+#define boolean_domain_param(_name, _flags, _var) \
+    __rtparam __domain_par_##_var = \
+        def_var_param(_name, OPT_BOOL, SCOPE_DOMAIN, _flags, \
+                      (struct domain *)NULL->_var)
+#define integer_domain_param(_name, _flags, _var) \
+    __rtparam __domain_par_##_var = \
+        def_var_param(_name, OPT_UINT, SCOPE_DOMAIN, _flags, \
+                      (struct domain *)NULL->_var)
+#define size_domain_param(_name, _flags, _var) \
+    __rtparam __domain_par_##_var = \
+        def_var_param(_name, OPT_SIZE, SCOPE_DOMAIN, _flags, \
+                      (struct domain *)NULL->_var)
+#define string_domain_param(_name, _flags, _var) \
+    __rtparam __domain_par_##_var = \
+        def_var_param(_name, OPT_STR, SCOPE_DOMAIN, _flags, \
+                      (struct domain *)NULL->_var)
 
 #endif /* __ASSEMBLY__ */
 
