@@ -18,6 +18,11 @@
 
 #ifndef COMPAT
 
+struct parse_data {
+    const struct kernel_param *start;
+    const struct kernel_param *end;
+};
+
 enum system_state system_state = SYS_STATE_early_boot;
 
 xen_commandline_t saved_cmdline;
@@ -52,8 +57,7 @@ static int assign_integer_param(const struct kernel_param *param, uint64_t val)
     return 0;
 }
 
-static int parse_params(const char *cmdline, const struct kernel_param *start,
-                        const struct kernel_param *end)
+static int parse_params(const char *cmdline, const struct parse_data *data)
 {
     char opt[128], *optval, *optkey, *q;
     const char *p = cmdline, *key;
@@ -100,7 +104,7 @@ static int parse_params(const char *cmdline, const struct kernel_param *start,
 
         rc = 0;
         found = false;
-        for ( param = start; param < end; param++ )
+        for ( param = data->start; param < data->end; param++ )
         {
             int rctmp;
             const char *s;
@@ -187,14 +191,24 @@ static int parse_params(const char *cmdline, const struct kernel_param *start,
     return final_rc;
 }
 
+static const struct parse_data boot_parse_data = {
+    .start  = __setup_start,
+    .end    = __setup_end,
+};
+
+static const struct parse_data runtime_parse_data = {
+    .start  = __param_start,
+    .end    = __param_end,
+};
+
 static void __init _cmdline_parse(const char *cmdline)
 {
-    parse_params(cmdline, __setup_start, __setup_end);
+    parse_params(cmdline, &boot_parse_data);
 }
 
 int runtime_parse(const char *line)
 {
-    return parse_params(line, __param_start, __param_end);
+    return parse_params(line, &runtime_parse_data);
 }
 
 /**
