@@ -22,6 +22,7 @@ struct parse_data {
     enum param_scope scope;
     const struct kernel_param *start;
     const struct kernel_param *end;
+    int (*check)(void *instance, unsigned int flags);
 };
 
 enum system_state system_state = SYS_STATE_early_boot;
@@ -124,7 +125,10 @@ static int parse_params(const char *cmdline, const struct parse_data *data,
                 {
                     found = true;
                     optval[-1] = '=';
-                    rctmp = param->par.call(q, instance);
+                    rctmp = data->check
+                            ? data->check(instance, param->flags) : 0;
+                    if ( !rctmp )
+                        rctmp = param->par.call(q, instance);
                     optval[-1] = '\0';
                     if ( !rc )
                         rc = rctmp;
@@ -132,7 +136,14 @@ static int parse_params(const char *cmdline, const struct parse_data *data,
                 continue;
             }
 
-            rctmp = 0;
+            rctmp = data->check ? data->check(instance, param->flags) : 0;
+            if ( rctmp )
+            {
+                if ( !rc )
+                    rc = rctmp;
+                continue;
+            }
+
             found = true;
             ptr = (void *)((uint64_t)param->par.var + (uint64_t)instance);
             switch ( param->type )
