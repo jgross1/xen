@@ -49,6 +49,57 @@ DECLARE_PER_CPU(struct scheduler *, scheduler);
 DECLARE_PER_CPU(struct cpupool *, cpupool);
 DECLARE_PER_CPU(struct sched_resource *, sched_res);
 
+static inline bool is_idle_item(const struct sched_item *item)
+{
+    return is_idle_vcpu(item->vcpu);
+}
+
+static inline bool item_runnable(const struct sched_item *item)
+{
+    return vcpu_runnable(item->vcpu);
+}
+
+static inline void sched_set_res(struct sched_item *item,
+                                 struct sched_resource *res)
+{
+    item->vcpu->processor = res->processor;
+    item->res = res;
+}
+
+static inline unsigned int sched_item_cpu(struct sched_item *item)
+{
+    return item->res->processor;
+}
+
+static inline void sched_set_pause_flags(struct sched_item *item,
+                                         unsigned int bit)
+{
+    __set_bit(bit, &item->vcpu->pause_flags);
+}
+
+static inline void sched_clear_pause_flags(struct sched_item *item,
+                                           unsigned int bit)
+{
+    __clear_bit(bit, &item->vcpu->pause_flags);
+}
+
+static inline void sched_set_pause_flags_atomic(struct sched_item *item,
+                                                unsigned int bit)
+{
+    set_bit(bit, &item->vcpu->pause_flags);
+}
+
+static inline void sched_clear_pause_flags_atomic(struct sched_item *item,
+                                                  unsigned int bit)
+{
+    clear_bit(bit, &item->vcpu->pause_flags);
+}
+
+static inline struct sched_item *sched_idle_item(unsigned int cpu)
+{
+    return idle_vcpu[cpu]->sched_item;
+}
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:
@@ -363,10 +414,7 @@ static inline void sched_migrate(const struct scheduler *s,
     if ( s->migrate )
         s->migrate(s, item, cpu);
     else
-    {
-        item->vcpu->processor = cpu;
-        item->res = per_cpu(sched_res, cpu);
-    }
+        sched_set_res(item, per_cpu(sched_res, cpu));
 }
 
 static inline struct sched_resource *sched_pick_resource(
