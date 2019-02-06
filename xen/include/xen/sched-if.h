@@ -41,6 +41,7 @@ struct sched_resource {
     struct timer        s_timer;        /* scheduling timer                */
     atomic_t            urgent_count;   /* how many urgent vcpus           */
     unsigned            processor;
+    const cpumask_t    *cpus;           /* cpus covered by this struct     */
 };
 
 #define curr_on_cpu(c)    (per_cpu(sched_res, c)->curr)

@@ -295,6 +295,12 @@ struct sched_item {
     /* Next item to run. */
     struct sched_item      *next_task;
     s_time_t                next_time;
+
+    /* Number of vcpus not yet joined for context switch. */
+    unsigned int            rendezvous_in_cnt;
+
+    /* Number of vcpus not yet finished with context switch. */
+    atomic_t                rendezvous_out_cnt;
 };
 
 #define for_each_sched_item(d, e)                                         \
@@ -698,10 +704,10 @@ void sync_local_execstate(void);
 
 /*
  * Called by the scheduler to switch to another VCPU. This function must
- * call context_saved(@prev) when the local CPU is no longer running in
- * @prev's context, and that context is saved to memory. Alternatively, if
- * implementing lazy context switching, it suffices to ensure that invoking
- * sync_vcpu_execstate() will switch and commit @prev's state.
+ * call sched_context_switched(@prev, @next) when the local CPU is no longer
+ * running in @prev's context, and that context is saved to memory.
+ * Alternatively, if implementing lazy context switching, it suffices to ensure
+ * that invoking sync_vcpu_execstate() will switch and commit @prev's state.
  */
 void context_switch(
     struct vcpu *prev,
@@ -713,7 +719,7 @@ void context_switch(
  * saved to memory. Alternatively, if implementing lazy context switching,
  * ensure that invoking sync_vcpu_execstate() will switch and commit @prev.
  */
-void context_saved(struct vcpu *prev);
+void sched_context_switched(struct vcpu *prev, struct vcpu *vnext);
 
 /* Called by the scheduler to continue running the current VCPU. */
 void continue_running(

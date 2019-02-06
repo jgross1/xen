@@ -1714,7 +1714,6 @@ static void __context_switch(void)
     per_cpu(curr_vcpu, cpu) = n;
 }
 
-
 void context_switch(struct vcpu *prev, struct vcpu *next)
 {
     unsigned int cpu = smp_processor_id();
@@ -1792,7 +1791,7 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
         }
     }
 
-    context_saved(prev);
+    sched_context_switched(prev, next);
 
     if ( prev != next )
     {

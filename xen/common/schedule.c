@@ -54,6 +54,10 @@ boolean_param("sched_smt_power_savings", sched_smt_power_savings);
  * */
 int sched_ratelimit_us = SCHED_DEFAULT_RATELIMIT_US;
 integer_param("sched_ratelimit_us", sched_ratelimit_us);
+
+/* Number of vcpus per struct sched_item. */
+static unsigned int sched_granularity = 1;
+
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
 static void vcpu_periodic_timer_fn(void *data);
@@ -1564,87 +1568,21 @@ static void vcpu_periodic_timer_work(struct vcpu *v)
     set_timer(&v->periodic_timer, periodic_next_event);
 }
 
-/*
- * The main function
- * - deschedule the current domain (scheduler independent).
- * - pick a new domain (scheduler dependent).
- */
-static void schedule(void)
+static void sched_switch_items(struct sched_resource *sd,
+                               struct sched_item *next, struct sched_item *prev,
+                               s_time_t now)
 {
-    struct sched_item    *prev = current->sched_item, *next = NULL;
-    s_time_t              now;
-    struct scheduler     *sched;
-    unsigned long        *tasklet_work = &this_cpu(tasklet_work_to_do);
-    bool                  tasklet_work_scheduled = false;
-    struct sched_resource *sd;
-    spinlock_t           *lock;
-    int cpu = smp_processor_id();
-
-    ASSERT_NOT_IN_ATOMIC();
-
-    SCHED_STAT_CRANK(sched_run);
-
-    sd = this_cpu(sched_res);
-
-    /* Update tasklet scheduling status. */
-    switch ( *tasklet_work )
-    {
-    case TASKLET_enqueued:
-        set_bit(_TASKLET_scheduled, tasklet_work);
-        /* fallthrough */
-    case TASKLET_enqueued|TASKLET_scheduled:
-        tasklet_work_scheduled = true;
-        break;
-    case TASKLET_scheduled:
-        clear_bit(_TASKLET_scheduled, tasklet_work);
-    case 0:
-        /*tasklet_work_scheduled = false;*/
-        break;
-    default:
-        BUG();
-    }
-
-    lock = pcpu_schedule_lock_irq(cpu);
-
-    now = NOW();
-
-    stop_timer(&sd->s_timer);
-
-    /* get policy-specific decision on scheduling... */
-    sched = this_cpu(scheduler);
-    sched->do_schedule(sched, prev, now, tasklet_work_scheduled);
-
-    next = prev->next_task;
-
     sd->curr = next;
 
-    if ( prev->next_time >= 0 ) /* -ve means no limit */
-        set_timer(&sd->s_timer, now + prev->next_time);
-
-    if ( unlikely(prev == next) )
-    {
-        pcpu_schedule_unlock_irq(lock, cpu);
-        TRACE_4D(TRC_SCHED_SWITCH_INFCONT,
-                 next->domain->domain_id, next->item_id,
-                 now - prev->state_entry_time,
-                 prev->next_time);
-        trace_continue_running(next->vcpu);
-        return continue_running(prev->vcpu);
-    }
-
-    TRACE_3D(TRC_SCHED_SWITCH_INFPREV,
-             prev->domain->domain_id, prev->item_id,
+    TRACE_3D(TRC_SCHED_SWITCH_INFPREV, prev->domain->domain_id, prev->item_id,
              now - prev->state_entry_time);
-    TRACE_4D(TRC_SCHED_SWITCH_INFNEXT,
-             next->domain->domain_id, next->item_id,
+    TRACE_4D(TRC_SCHED_SWITCH_INFNEXT, next->domain->domain_id, next->item_id,
              (next->vcpu->runstate.state == RUNSTATE_runnable) ?
-             (now - next->state_entry_time) : 0,
-             prev->next_time);
+             (now - next->state_entry_time) : 0, prev->next_time);
 
     ASSERT(prev->vcpu->runstate.state == RUNSTATE_running);
 
-    TRACE_4D(TRC_SCHED_SWITCH,
-             prev->domain->domain_id, prev->item_id,
+    TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->item_id,
              next->domain->domain_id, next->item_id);
 
     sched_item_runstate_change(prev, false, now);
@@ -1661,37 +1599,260 @@ static void schedule(void)
     ASSERT(!next->is_running);
     next->vcpu->is_running = 1;
     next->is_running = 1;
-    next->state_entry_time = now;
-
-    pcpu_schedule_unlock_irq(lock, cpu);
-
-    SCHED_STAT_CRANK(sched_ctx);
-
-    stop_timer(&prev->vcpu->periodic_timer);
-
-    if ( next->migrated )
-        vcpu_move_irqs(next->vcpu);
-
-    vcpu_periodic_timer_work(next->vcpu);
-
-    context_switch(prev->vcpu, next->vcpu);
 }
 
-void context_saved(struct vcpu *prev)
+static bool sched_tasklet_check(void)
 {
-    /* Clear running flag /after/ writing context to memory. */
-    smp_wmb();
+    unsigned long *tasklet_work;
+    bool tasklet_work_scheduled = false;
+    const cpumask_t *mask = this_cpu(sched_res)->cpus;
+    int cpu;
 
-    prev->is_running = 0;
-    prev->sched_item->is_running = 0;
-    prev->sched_item->state_entry_time = NOW();
+    for_each_cpu ( cpu, mask )
+    {
+        tasklet_work = &per_cpu(tasklet_work_to_do, cpu);
+
+        switch ( *tasklet_work )
+        {
+        case TASKLET_enqueued:
+            set_bit(_TASKLET_scheduled, tasklet_work);
+            /* fallthrough */
+        case TASKLET_enqueued|TASKLET_scheduled:
+            tasklet_work_scheduled = true;
+            break;
+        case TASKLET_scheduled:
+            clear_bit(_TASKLET_scheduled, tasklet_work);
+        case 0:
+            /*tasklet_work_scheduled = false;*/
+            break;
+        default:
+            BUG();
+        }
+    }
+
+    return tasklet_work_scheduled;
+}
+
+static struct sched_item *do_schedule(struct sched_item *prev, s_time_t now)
+{
+    struct scheduler *sched = this_cpu(scheduler);
+    struct sched_resource *sd = this_cpu(sched_res);
+    struct sched_item *next;
+
+    /* get policy-specific decision on scheduling... */
+    sched->do_schedule(sched, prev, now, sched_tasklet_check());
+
+    next = prev->next_task;
+
+    if ( prev->next_time >= 0 ) /* -ve means no limit */
+        set_timer(&sd->s_timer, now + prev->next_time);
+
+    if ( likely(prev != next) )
+        sched_switch_items(sd, next, prev, now);
+
+    return next;
+}
+
+static void context_saved(struct vcpu *prev)
+{
+    struct sched_item *item = prev->sched_item;
+
+    item->is_running = 0;
+    item->state_entry_time = NOW();
 
     /* Check for migration request /after/ clearing running flag. */
     smp_mb();
 
-    sched_context_saved(vcpu_scheduler(prev), prev->sched_item);
+    sched_context_saved(vcpu_scheduler(prev), item);
 
-    sched_item_migrate_finish(prev->sched_item);
+    sched_item_migrate_finish(item);
+}
+
+/*
+ * Rendezvous on end of context switch.
+ * As no lock is protecting this rendezvous function we need to use atomic
+ * access functions on the counter.
+ * The counter will be 0 in case no rendezvous is needed. For the rendezvous
+ * case it is initialised to the number of cpus to rendezvous plus 1. Each
+ * member entering decrements the counter. The last one will decrement it to
+ * 1 and perform the final needed action in that case (call of context_saved()
+ * if vcpu was switched), and then set the counter to zero. The other members
+ * will wait until the counter becomes zero until they proceed.
+ */
+void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
+{
+    struct sched_item *next = vnext->sched_item;
+
+    /* Clear running flag /after/ writing context to memory. */
+    smp_wmb();
+
+    vprev->is_running = 0;
+
+    if ( atomic_read(&next->rendezvous_out_cnt) )
+    {
+        int cnt = atomic_dec_return(&next->rendezvous_out_cnt);
+
+        /* Call context_saved() before releasing other waiters. */
+        if ( cnt == 1 )
+        {
+            if ( vprev != vnext )
+                context_saved(vprev);
+            atomic_set(&next->rendezvous_out_cnt, 0);
+        }
+        else
+            while ( atomic_read(&next->rendezvous_out_cnt) )
+                cpu_relax();
+    }
+    else if ( vprev != vnext )
+        context_saved(vprev);
+}
+
+static void sched_context_switch(struct vcpu *vprev, struct vcpu *vnext,
+                                 s_time_t now)
+{
+    if ( unlikely(vprev == vnext) )
+    {
+        TRACE_4D(TRC_SCHED_SWITCH_INFCONT,
+                 vnext->domain->domain_id, vnext->sched_item->item_id,
+                 now - vprev->runstate.state_entry_time,
+                 vprev->sched_item->next_time);
+        sched_context_switched(vprev, vnext);
+        trace_continue_running(vnext);
+        return continue_running(vprev);
+    }
+
+    SCHED_STAT_CRANK(sched_ctx);
+
+    stop_timer(&vprev->periodic_timer);
+
+    if ( vnext->sched_item->migrated )
+        vcpu_move_irqs(vnext);
+
+    vcpu_periodic_timer_work(vnext);
+
+    context_switch(vprev, vnext);
+}
+
+/*
+ * Rendezvous before taking a scheduling decision.
+ * Called with schedule lock held, so all accesses to the rendezvous counter
+ * can be normal ones (no atomic accesses needed).
+ * The counter is initialized to the number of cpus to rendezvous initially.
+ * Each cpu entering will decrement the counter. In case the counter becomes
+ * zero do_schedule() is called and the rendezvous counter for leaving
+ * context_switch() is set. All other members will wait until the counter is
+ * becoming zero, dropping the schedule lock in between.
+ */
+static struct sched_item *sched_wait_rendezvous_in(struct sched_item *prev,
+                                                   spinlock_t *lock, int cpu,
+                                                   s_time_t now)
+{
+    struct sched_item *next;
+
+    if ( !--prev->rendezvous_in_cnt )
+    {
+        next = do_schedule(prev, now);
+        atomic_set(&next->rendezvous_out_cnt, sched_granularity + 1);
+        return next;
+    }
+
+    while ( prev->rendezvous_in_cnt )
+    {
+        pcpu_schedule_unlock_irq(lock, cpu);
+        cpu_relax();
+        pcpu_schedule_lock_irq(cpu);
+    }
+
+    return prev->next_task;
+}
+
+static void sched_slave(void)
+{
+    struct vcpu          *vprev = current;
+    struct sched_item    *prev = vprev->sched_item, *next;
+    s_time_t              now;
+    spinlock_t           *lock;
+    int cpu = smp_processor_id();
+
+    ASSERT_NOT_IN_ATOMIC();
+
+    lock = pcpu_schedule_lock_irq(cpu);
+
+    now = NOW();
+
+    if ( !prev->rendezvous_in_cnt )
+    {
+        pcpu_schedule_unlock_irq(lock, cpu);
+        return;
+    }
+
+    stop_timer(&this_cpu(sched_res)->s_timer);
+
+    next = sched_wait_rendezvous_in(prev, lock, cpu, now);
+
+    pcpu_schedule_unlock_irq(lock, cpu);
+
+    sched_context_switch(vprev, next->vcpu, now);
+}
+
+/*
+ * The main function
+ * - deschedule the current domain (scheduler independent).
+ * - pick a new domain (scheduler dependent).
+ */
+static void schedule(void)
+{
+    struct vcpu          *vnext, *vprev = current;
+    struct sched_item    *prev = vprev->sched_item, *next = NULL;
+    s_time_t              now;
+    struct sched_resource *sd;
+    spinlock_t           *lock;
+    int cpu = smp_processor_id();
+
+    ASSERT_NOT_IN_ATOMIC();
+
+    SCHED_STAT_CRANK(sched_run);
+
+    sd = this_cpu(sched_res);
+
+    lock = pcpu_schedule_lock_irq(cpu);
+
+    if ( prev->rendezvous_in_cnt )
+    {
+        /*
+         * We have a race: sched_slave() should be called, so raise a softirq
+         * in order to re-enter schedule() later and call sched_slave() now.
+         */
+        pcpu_schedule_unlock_irq(lock, cpu);
+
+        raise_softirq(SCHEDULE_SOFTIRQ);
+        return sched_slave();
+    }
+
+    now = NOW();
+
+    stop_timer(&sd->s_timer);
+
+    if ( sched_granularity > 1 )
+    {
+        cpumask_t mask;
+
+        prev->rendezvous_in_cnt = sched_granularity;
+        cpumask_andnot(&mask, sd->cpus, cpumask_of(cpu));
+        cpumask_raise_softirq(&mask, SCHED_SLAVE_SOFTIRQ);
+        next = sched_wait_rendezvous_in(prev, lock, cpu, now);
+    }
+    else
+    {
+        prev->rendezvous_in_cnt = 0;
+        next = do_schedule(prev, now);
+        atomic_set(&next->rendezvous_out_cnt, 0);
+    }
+
+    pcpu_schedule_unlock_irq(lock, cpu);
+
+    vnext = next->vcpu;
+    sched_context_switch(vprev, vnext, now);
 }
 
 /* The scheduler timer: force a run through the scheduler */
@@ -1733,6 +1894,7 @@ static int cpu_schedule_up(unsigned int cpu)
     if ( sd == NULL )
         return -ENOMEM;
     sd->processor = cpu;
+    sd->cpus = cpumask_of(cpu);
     per_cpu(sched_res, cpu) = sd;
 
     per_cpu(scheduler, cpu) = &ops;
@@ -1892,6 +2054,7 @@ void __init scheduler_init(void)
     int i;
 
     open_softirq(SCHEDULE_SOFTIRQ, schedule);
+    open_softirq(SCHED_SLAVE_SOFTIRQ, sched_slave);
 
     for ( i = 0; i < NUM_SCHEDULERS; i++)
     {
