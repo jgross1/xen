@@ -275,10 +275,25 @@ static void sched_spin_unlock_double(spinlock_t *lock1, spinlock_t *lock2,
     spin_unlock_irqrestore(lock1, flags);
 }
 
-static void sched_free_item(struct sched_item *item)
+static void sched_free_item(struct sched_item *item, struct vcpu *v)
 {
     struct sched_item *prev_item;
     struct domain *d = item->domain;
+    struct vcpu *vitem;
+    unsigned int cnt = 0;
+
+    /* Don't count to be released vcpu, might be not in vcpu list yet. */
+    for_each_sched_item_vcpu ( item, vitem )
+        if ( vitem != v )
+            cnt++;
+
+    v->sched_item = NULL;
+
+    if ( cnt )
+        return;
+
+    if ( item->vcpu == v )
+        item->vcpu = v->next_in_list;
 
     if ( d->sched_item_list == item )
         d->sched_item_list = item->next_in_list;
@@ -294,8 +309,6 @@ static void sched_free_item(struct sched_item *item)
         }
     }
 
-    item->vcpu->sched_item = NULL;
-
     free_cpumask_var(item->cpu_hard_affinity);
     free_cpumask_var(item->cpu_hard_affinity_tmp);
     free_cpumask_var(item->cpu_hard_affinity_saved);
@@ -304,17 +317,36 @@ static void sched_free_item(struct sched_item *item)
     xfree(item);
 }
 
+static void sched_item_add_vcpu(struct sched_item *item, struct vcpu *v)
+{
+    v->sched_item = item;
+    if ( !item->vcpu || item->vcpu->vcpu_id > v->vcpu_id )
+    {
+        item->vcpu = v;
+        item->item_id = v->vcpu_id;
+    }
+}
+
 static struct sched_item *sched_alloc_item(struct vcpu *v)
 {
     struct sched_item *item, **prev_item;
     struct domain *d = v->domain;
 
+    for_each_sched_item ( d, item )
+        if ( item->vcpu->vcpu_id / sched_granularity ==
+             v->vcpu_id / sched_granularity )
+            break;
+
+    if ( item )
+    {
+        sched_item_add_vcpu(item, v);
+        return item;
+    }
+
     if ( (item = xzalloc(struct sched_item)) == NULL )
         return NULL;
 
-    v->sched_item = item;
-    item->vcpu = v;
-    item->item_id = v->vcpu_id;
+    sched_item_add_vcpu(item, v);
     item->domain = d;
 
     for ( prev_item = &d->sched_item_list; *prev_item;
@@ -335,7 +367,7 @@ static struct sched_item *sched_alloc_item(struct vcpu *v)
     return item;
 
  fail:
-    sched_free_item(item);
+    sched_free_item(item, v);
     return NULL;
 }
 
@@ -377,8 +409,6 @@ int sched_init_vcpu(struct vcpu *v)
     else
         processor = sched_select_initial_cpu(v);
 
-    sched_set_res(item, per_cpu(sched_res, processor));
-
     /* Initialise the per-vcpu timers. */
     init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
                v, v->processor);
@@ -387,10 +417,22 @@ int sched_init_vcpu(struct vcpu *v)
     init_timer(&v->poll_timer, poll_timer_fn,
                v, v->processor);
 
+    /* If this is not the first vcpu of the item we are done. */
+    if ( item->priv != NULL )
+    {
+        /* We can rely on previous vcpu to exist. */
+        v->processor = cpumask_next(d->vcpu[v->vcpu_id - 1]->processor,
+                                    item->res->cpus);
+        return 0;
+    }
+
+    /* The first vcpu of an item can be set via sched_set_res(). */
+    sched_set_res(item, per_cpu(sched_res, processor));
+
     item->priv = sched_alloc_vdata(dom_scheduler(d), item, d->sched_priv);
     if ( item->priv == NULL )
     {
-        sched_free_item(item);
+        sched_free_item(item, v);
         return 1;
     }
 
@@ -544,9 +586,16 @@ void sched_destroy_vcpu(struct vcpu *v)
     kill_timer(&v->poll_timer);
     if ( test_and_clear_bool(v->is_urgent) )
         atomic_dec(&per_cpu(sched_res, v->processor)->urgent_count);
-    sched_remove_item(vcpu_scheduler(v), item);
-    sched_free_vdata(vcpu_scheduler(v), item->priv);
-    sched_free_item(item);
+    /*
+     * Vcpus are being destroyed top-down. So being the first vcpu of an item
+     * is the same as being the only one.
+     */
+    if ( item->vcpu == v )
+    {
+        sched_remove_item(vcpu_scheduler(v), item);
+        sched_free_vdata(vcpu_scheduler(v), item->priv);
+        sched_free_item(item, v);
+    }
 }
 
 int sched_init_domain(struct domain *d, int poolid)
