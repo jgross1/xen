@@ -261,6 +261,7 @@ struct vcpu
 struct sched_resource;
 
 struct sched_item {
+    struct domain         *domain;
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;

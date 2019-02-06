@@ -253,7 +253,7 @@ static void sched_spin_unlock_double(spinlock_t *lock1, spinlock_t *lock2,
 static void sched_free_item(struct sched_item *item)
 {
     struct sched_item *prev_item;
-    struct domain *d = item->vcpu->domain;
+    struct domain *d = item->domain;
 
     if ( d->sched_item_list == item )
         d->sched_item_list = item->next_in_list;
@@ -289,6 +289,7 @@ static struct sched_item *sched_alloc_item(struct vcpu *v)
 
     v->sched_item = item;
     item->vcpu = v;
+    item->domain = d;
 
     for ( prev_item = &d->sched_item_list; *prev_item;
           prev_item = &(*prev_item)->next_in_list )
