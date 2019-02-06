@@ -258,6 +258,7 @@ unsigned int __init dom0_max_vcpus(void)
         max_vcpus = opt_dom0_max_vcpus_min;
     if ( opt_dom0_max_vcpus_max < max_vcpus )
         max_vcpus = opt_dom0_max_vcpus_max;
+    max_vcpus = sched_max_vcpus(max_vcpus);
     limit = dom0_pvh ? HVM_MAX_VCPUS : MAX_VIRT_CPUS;
     if ( max_vcpus > limit )
         max_vcpus = limit;
