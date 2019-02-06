@@ -541,6 +541,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
     {
         unsigned int i, max = op->u.max_vcpus.max;
 
+        max = sched_max_vcpus(max);
         ret = -EINVAL;
         if ( (d == current->domain) || /* no domain_pause() */
              (max != d->max_vcpus) )   /* max_vcpus set up in createdomain */

@@ -490,6 +490,11 @@ extern struct vcpu *idle_vcpu[NR_CPUS];
 
 extern unsigned int sched_granularity;
 
+static inline unsigned int sched_max_vcpus(unsigned int n_vcpus)
+{
+    return DIV_ROUND_UP(n_vcpus, sched_granularity) * sched_granularity;
+}
+
 static inline bool is_system_domain(const struct domain *d)
 {
     return d->domain_id >= DOMID_FIRST_RESERVED;
