@@ -266,6 +266,7 @@ struct sched_item {
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;
     struct sched_resource *res;
+    int                    item_id;
 
     /* Last time when item has been scheduled out. */
     uint64_t               last_run_time;
