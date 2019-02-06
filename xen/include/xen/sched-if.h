@@ -44,14 +44,20 @@ struct schedule_data {
 
 #define curr_on_cpu(c)    (per_cpu(schedule_data, c).curr)
 
+struct sched_resource {
+    unsigned     processor;
+};
+
 DECLARE_PER_CPU(struct schedule_data, schedule_data);
 DECLARE_PER_CPU(struct scheduler *, scheduler);
 DECLARE_PER_CPU(struct cpupool *, cpupool);
+DECLARE_PER_CPU(struct sched_resource *, sched_res);
 
 struct sched_item {
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;
+    struct sched_resource *res;
 };
 
 #define for_each_sched_item(d, e)                                         \

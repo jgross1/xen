@@ -2518,6 +2518,7 @@ static void migrate(const struct scheduler *ops,
                     &trqd->active);
         svc->vcpu->processor = cpumask_cycle(trqd->pick_bias,
                                              cpumask_scratch_cpu(cpu));
+        svc->vcpu->sched_item->res = per_cpu(sched_res, svc->vcpu->processor);
         trqd->pick_bias = svc->vcpu->processor;
         ASSERT(svc->vcpu->processor < nr_cpu_ids);
 
@@ -2773,6 +2774,7 @@ csched2_item_migrate(
         }
         _runq_deassign(svc);
         vc->processor = new_cpu;
+        item->res = per_cpu(sched_res, new_cpu);
         return;
     }
 
@@ -2793,7 +2795,10 @@ csched2_item_migrate(
     if ( trqd != svc->rqd )
         migrate(ops, svc, trqd, now);
     else
+    {
         vc->processor = new_cpu;
+        item->res = per_cpu(sched_res, new_cpu);
+    }
 }
 
 static int
@@ -3118,6 +3123,7 @@ csched2_item_insert(const struct scheduler *ops, struct sched_item *item)
     lock = vcpu_schedule_lock_irq(vc);
 
     vc->processor = csched2_cpu_pick(ops, item);
+    item->res = per_cpu(sched_res, vc->processor);
 
     spin_unlock_irq(lock);
 
@@ -3595,6 +3601,7 @@ csched2_schedule(
         {
             snext->credit += CSCHED2_MIGRATE_COMPENSATION;
             snext->vcpu->processor = cpu;
+            snext->vcpu->sched_item->res = per_cpu(sched_res, cpu);
             SCHED_STAT_CRANK(migrated);
             ret.migrated = 1;
         }
