@@ -343,6 +343,7 @@ static void vcpu_assign(struct null_private *prv, struct vcpu *v,
 {
     per_cpu(npc, cpu).vcpu = v;
     v->processor = cpu;
+    v->sched_item->res = per_cpu(sched_res, cpu);
     cpumask_clear_cpu(cpu, &prv->cpus_free);
 
     dprintk(XENLOG_G_INFO, "%d <-- %pv\n", cpu, v);
@@ -429,6 +430,7 @@ static void null_item_insert(const struct scheduler *ops,
  retry:
 
     cpu = v->processor = pick_cpu(prv, v);
+    item->res = per_cpu(sched_res, cpu);
 
     spin_unlock(lock);
 
@@ -675,6 +677,7 @@ static void null_item_migrate(const struct scheduler *ops,
      * by this, will be fixed-up during resume.
      */
     v->processor = new_cpu;
+    item->res = per_cpu(sched_res, new_cpu);
 }
 
 #ifndef NDEBUG
