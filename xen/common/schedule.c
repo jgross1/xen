@@ -57,6 +57,7 @@ integer_param("sched_ratelimit_us", sched_ratelimit_us);
 
 /* Number of vcpus per struct sched_item. */
 static unsigned int sched_granularity = 1;
+const cpumask_t *sched_res_mask = &cpumask_all;
 
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
@@ -347,9 +348,9 @@ static unsigned int sched_select_initial_cpu(struct vcpu *v)
     cpumask_clear(&cpus);
     for_each_node_mask ( node, d->node_affinity )
         cpumask_or(&cpus, &cpus, &node_to_cpumask(node));
-    cpumask_and(&cpus, &cpus, cpupool_domain_cpumask(d));
+    cpumask_and(&cpus, &cpus, d->cpupool->cpu_valid);
     if ( cpumask_empty(&cpus) )
-        cpumask_copy(&cpus, cpupool_domain_cpumask(d));
+        cpumask_copy(&cpus, d->cpupool->cpu_valid);
 
     if ( v->vcpu_id == 0 )
         return cpumask_first(&cpus);
