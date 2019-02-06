@@ -136,7 +136,7 @@
  * RTDS_delayed_runq_add: Do we need to add this to the RunQ/DepletedQ
  * once it's done being context switching out?
  * + Set when scheduling out in rt_schedule() if prev is runable
- * + Set in rt_vcpu_wake if it finds RTDS_scheduled set
+ * + Set in rt_item_wake if it finds RTDS_scheduled set
  * + Read in rt_context_saved(). If set, it adds prev to the Runqueue/DepletedQ
  *   and clears the bit.
  */
@@ -637,8 +637,9 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
  * and available cpus
  */
 static int
-rt_cpu_pick(const struct scheduler *ops, struct vcpu *vc)
+rt_cpu_pick(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     cpumask_t cpus;
     cpumask_t *online;
     int cpu;
@@ -846,8 +847,9 @@ rt_free_domdata(const struct scheduler *ops, void *data)
 }
 
 static void *
-rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
+rt_alloc_vdata(const struct scheduler *ops, struct sched_item *item, void *dd)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu *svc;
 
     /* Allocate per-VCPU info */
@@ -889,8 +891,9 @@ rt_free_vdata(const struct scheduler *ops, void *priv)
  * dest. cpupool.
  */
 static void
-rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
+rt_item_insert(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu *svc = rt_vcpu(vc);
     s_time_t now;
     spinlock_t *lock;
@@ -898,7 +901,7 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     BUG_ON( is_idle_vcpu(vc) );
 
     /* This is safe because vc isn't yet being scheduled */
-    vc->processor = rt_cpu_pick(ops, vc);
+    vc->processor = rt_cpu_pick(ops, item);
 
     lock = vcpu_schedule_lock_irq(vc);
 
@@ -922,8 +925,9 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
  * Remove rt_vcpu svc from the old scheduler in source cpupool.
  */
 static void
-rt_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
+rt_item_remove(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu * const svc = rt_vcpu(vc);
     struct rt_dom * const sdom = svc->sdom;
     spinlock_t *lock;
@@ -1142,8 +1146,9 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
  * The lock is already grabbed in schedule.c, no need to lock here
  */
 static void
-rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
+rt_item_sleep(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu * const svc = rt_vcpu(vc);
 
     BUG_ON( is_idle_vcpu(vc) );
@@ -1257,8 +1262,9 @@ runq_tickle(const struct scheduler *ops, struct rt_vcpu *new)
  * TODO: what if these two vcpus belongs to the same domain?
  */
 static void
-rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
+rt_item_wake(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu * const svc = rt_vcpu(vc);
     s_time_t now;
     bool_t missed;
@@ -1327,8 +1333,9 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
  * and then pick the highest priority vcpu from runq to run
  */
 static void
-rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
+rt_context_saved(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     struct rt_vcpu *svc = rt_vcpu(vc);
     spinlock_t *lock = vcpu_schedule_lock_irq(vc);
 
@@ -1557,15 +1564,15 @@ static const struct scheduler sched_rtds_def = {
     .free_domdata   = rt_free_domdata,
     .alloc_vdata    = rt_alloc_vdata,
     .free_vdata     = rt_free_vdata,
-    .insert_vcpu    = rt_vcpu_insert,
-    .remove_vcpu    = rt_vcpu_remove,
+    .insert_item    = rt_item_insert,
+    .remove_item    = rt_item_remove,
 
     .adjust         = rt_dom_cntl,
 
     .pick_cpu       = rt_cpu_pick,
     .do_schedule    = rt_schedule,
-    .sleep          = rt_vcpu_sleep,
-    .wake           = rt_vcpu_wake,
+    .sleep          = rt_item_sleep,
+    .wake           = rt_item_wake,
     .context_saved  = rt_context_saved,
 };
 
