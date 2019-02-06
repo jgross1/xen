@@ -72,6 +72,8 @@ struct sched_item {
     bool                   affinity_broken;
     /* Does soft affinity actually play a role (given hard affinity)? */
     bool                   soft_aff_effective;
+    /* Item has been migrated to other cpu(s). */
+    bool                   migrated;
     /* Bitmask of CPUs on which this VCPU may run. */
     cpumask_var_t          cpu_hard_affinity;
     /* Used to change affinity temporarily. */
@@ -80,6 +82,10 @@ struct sched_item {
     cpumask_var_t          cpu_hard_affinity_saved;
     /* Bitmask of CPUs on which this VCPU prefers to run. */
     cpumask_var_t          cpu_soft_affinity;
+
+    /* Next item to run. */
+    struct sched_item      *next_task;
+    s_time_t                next_time;
 };
 
 #define for_each_sched_item(d, e)                                         \
@@ -225,12 +231,6 @@ static inline spinlock_t *pcpu_schedule_trylock(unsigned int cpu)
     return NULL;
 }
 
-struct task_slice {
-    struct sched_item *task;
-    s_time_t           time;
-    bool_t             migrated;
-};
-
 struct scheduler {
     char *name;             /* full name for this scheduler      */
     char *opt_name;         /* option name for this scheduler    */
@@ -273,8 +273,9 @@ struct scheduler {
     void         (*context_saved)  (const struct scheduler *,
                                     struct sched_item *);
 
-    struct task_slice (*do_schedule) (const struct scheduler *, s_time_t,
-                                      bool_t tasklet_work_scheduled);
+    void         (*do_schedule)    (const struct scheduler *,
+                                    struct sched_item *, s_time_t,
+                                    bool tasklet_work_scheduled);
 
     struct sched_resource * (*pick_resource) (const struct scheduler *,
                                               struct sched_item *);

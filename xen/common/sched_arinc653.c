@@ -497,18 +497,14 @@ a653sched_item_wake(const struct scheduler *ops, struct sched_item *item)
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param now       Current time
- *
- * @return          Address of the ITEM structure scheduled to be run next
- *                  Amount of time to execute the returned ITEM
- *                  Flag for whether the ITEM was migrated
  */
-static struct task_slice
+static void
 a653sched_do_schedule(
     const struct scheduler *ops,
+    struct sched_item *prev,
     s_time_t now,
-    bool_t tasklet_work_scheduled)
+    bool tasklet_work_scheduled)
 {
-    struct task_slice ret;                      /* hold the chosen domain */
     struct sched_item *new_task = NULL;
     static unsigned int sched_index = 0;
     static s_time_t next_switch_time;
@@ -586,13 +582,11 @@ a653sched_do_schedule(
      * Return the amount of time the next domain has to run and the address
      * of the selected task's ITEM structure.
      */
-    ret.time = next_switch_time - now;
-    ret.task = new_task;
-    ret.migrated = 0;
+    prev->next_time = next_switch_time - now;
+    prev->next_task = new_task;
+    new_task->migrated = false;
 
-    BUG_ON(ret.time <= 0);
-
-    return ret;
+    BUG_ON(prev->next_time <= 0);
 }
 
 /**
