@@ -184,8 +184,9 @@ static inline void vcpu_runstate_change(
     s_time_t delta;
     bool old_run, new_run;
 
-    ASSERT(v->runstate.state != new_state);
     ASSERT(spin_is_locked(per_cpu(sched_res, v->processor)->schedule_lock));
+    if ( v->runstate.state == new_state )
+        return;
 
     vcpu_urgent_count_update(v);
 
@@ -221,18 +222,23 @@ static inline void vcpu_runstate_change(
     v->runstate.state = new_state;
 }
 
+static inline void vcpu_runstate_helper(struct vcpu *v, int new_state,
+                                        s_time_t new_entry_time)
+{
+    vcpu_runstate_change(v,
+        ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
+         (vcpu_runnable(v) ? new_state : RUNSTATE_offline)),
+        new_entry_time);
+}
+
 static inline void sched_item_runstate_change(struct sched_item *item,
     bool running, s_time_t new_entry_time)
 {
-    struct vcpu *v = item->vcpu;
+    int new_state = running ? RUNSTATE_running : RUNSTATE_runnable;
+    struct vcpu *v;
 
-    if ( running )
-        vcpu_runstate_change(v, RUNSTATE_running, new_entry_time);
-    else
-        vcpu_runstate_change(v,
-            ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
-             (vcpu_runnable(v) ? RUNSTATE_runnable : RUNSTATE_offline)),
-            new_entry_time);
+    for_each_sched_item_vcpu( item, v )
+        vcpu_runstate_helper(v, new_state, new_entry_time);
 }
 
 void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate)
@@ -1616,7 +1622,7 @@ static void sched_switch_items(struct sched_resource *sd,
              (next->vcpu->runstate.state == RUNSTATE_runnable) ?
              (now - next->state_entry_time) : 0, prev->next_time);
 
-    ASSERT(prev->vcpu->runstate.state == RUNSTATE_running);
+    ASSERT(item_running(prev));
 
     TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->item_id,
              next->domain->domain_id, next->item_id);
@@ -1624,7 +1630,7 @@ static void sched_switch_items(struct sched_resource *sd,
     sched_item_runstate_change(prev, false, now);
     prev->last_run_time = now;
 
-    ASSERT(next->vcpu->runstate.state != RUNSTATE_running);
+    ASSERT(!item_running(next));
     sched_item_runstate_change(next, true, now);
 
     /*
