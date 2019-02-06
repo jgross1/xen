@@ -317,7 +317,7 @@ pick_res(struct null_private *prv, struct sched_item *item)
      * all the pCPUs are busy.
      *
      * In fact, there must always be something sane in v->processor, or
-     * vcpu_schedule_lock() and friends won't work. This is not a problem,
+     * item_schedule_lock() and friends won't work. This is not a problem,
      * as we will actually assign the vCPU to the pCPU we return from here,
      * only if the pCPU is free.
      */
@@ -428,7 +428,7 @@ static void null_item_insert(const struct scheduler *ops,
 
     ASSERT(!is_idle_vcpu(v));
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = item_schedule_lock_irq(item);
  retry:
 
     item->res = pick_res(prv, item);
@@ -436,7 +436,7 @@ static void null_item_insert(const struct scheduler *ops,
 
     spin_unlock(lock);
 
-    lock = vcpu_schedule_lock(v);
+    lock = item_schedule_lock(item);
 
     cpumask_and(cpumask_scratch_cpu(cpu), v->cpu_hard_affinity,
                 cpupool_domain_cpumask(v->domain));
@@ -522,7 +522,7 @@ static void null_item_remove(const struct scheduler *ops,
 
     ASSERT(!is_idle_vcpu(v));
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = item_schedule_lock_irq(item);
 
     /* If v is in waitqueue, just get it out of there and bail */
     if ( unlikely(!list_empty(&nvc->waitq_elem)) )
@@ -540,7 +540,7 @@ static void null_item_remove(const struct scheduler *ops,
     _vcpu_remove(prv, v);
 
  out:
-    vcpu_schedule_unlock_irq(lock, v);
+    item_schedule_unlock_irq(lock, item);
 
     SCHED_STAT_CRANK(vcpu_remove);
 }
@@ -860,13 +860,13 @@ static void null_dump(const struct scheduler *ops)
             struct null_item * const nvc = null_item(v->sched_item);
             spinlock_t *lock;
 
-            lock = vcpu_schedule_lock(nvc->vcpu);
+            lock = item_schedule_lock(nvc->vcpu->sched_item);
 
             printk("\t%3d: ", ++loop);
             dump_vcpu(prv, nvc);
             printk("\n");
 
-            vcpu_schedule_unlock(lock, nvc->vcpu);
+            item_schedule_unlock(lock, nvc->vcpu->sched_item);
         }
     }
 
