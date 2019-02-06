@@ -424,16 +424,17 @@ static void sched_move_irqs(struct sched_item *item)
 int sched_move_domain(struct domain *d, struct cpupool *c)
 {
     struct vcpu *v;
+    struct sched_item *item;
     unsigned int new_p;
-    void **vcpu_priv;
+    void **item_priv;
     void *domdata;
-    void *vcpudata;
+    void *itemdata;
     struct scheduler *old_ops;
     void *old_domdata;
 
-    for_each_vcpu ( d, v )
+    for_each_sched_item ( d, item )
     {
-        if ( v->sched_item->affinity_broken )
+        if ( item->affinity_broken )
             return -EBUSY;
     }
 
@@ -441,22 +442,22 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
     if ( IS_ERR(domdata) )
         return PTR_ERR(domdata);
 
-    vcpu_priv = xzalloc_array(void *, d->max_vcpus);
-    if ( vcpu_priv == NULL )
+    item_priv = xzalloc_array(void *, d->max_vcpus);
+    if ( item_priv == NULL )
     {
         sched_free_domdata(c->sched, domdata);
         return -ENOMEM;
     }
 
-    for_each_vcpu ( d, v )
+    for_each_sched_item ( d, item )
     {
-        vcpu_priv[v->vcpu_id] = SCHED_OP(c->sched, alloc_vdata,
-                                         v->sched_item, domdata);
-        if ( vcpu_priv[v->vcpu_id] == NULL )
+        item_priv[item->item_id] = SCHED_OP(c->sched, alloc_vdata,
+                                            item, domdata);
+        if ( item_priv[item->item_id] == NULL )
         {
-            for_each_vcpu ( d, v )
-                xfree(vcpu_priv[v->vcpu_id]);
-            xfree(vcpu_priv);
+            for_each_sched_item ( d, item )
+                xfree(item_priv[item->item_id]);
+            xfree(item_priv);
             sched_free_domdata(c->sched, domdata);
             return -ENOMEM;
         }
@@ -467,30 +468,35 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
     old_ops = dom_scheduler(d);
     old_domdata = d->sched_priv;
 
-    for_each_vcpu ( d, v )
+    for_each_sched_item ( d, item )
     {
-        SCHED_OP(old_ops, remove_item, v->sched_item);
+        SCHED_OP(old_ops, remove_item, item);
     }
 
     d->cpupool = c;
     d->sched_priv = domdata;
 
     new_p = cpumask_first(c->cpu_valid);
-    for_each_vcpu ( d, v )
+    for_each_sched_item ( d, item )
     {
         spinlock_t *lock;
+        unsigned int item_p = new_p;
 
-        vcpudata = v->sched_item->priv;
+        itemdata = item->priv;
 
-        migrate_timer(&v->periodic_timer, new_p);
-        migrate_timer(&v->singleshot_timer, new_p);
-        migrate_timer(&v->poll_timer, new_p);
+        for_each_sched_item_vcpu( item, v )
+        {
+            migrate_timer(&v->periodic_timer, new_p);
+            migrate_timer(&v->singleshot_timer, new_p);
+            migrate_timer(&v->poll_timer, new_p);
+            new_p = cpumask_cycle(new_p, c->cpu_valid);
+        }
 
-        lock = item_schedule_lock_irq(v->sched_item);
+        lock = item_schedule_lock_irq(item);
 
-        sched_set_affinity(v, &cpumask_all, &cpumask_all);
+        sched_set_affinity(item->vcpu, &cpumask_all, &cpumask_all);
 
-        sched_set_res(v->sched_item, per_cpu(sched_res, new_p));
+        sched_set_res(item, per_cpu(sched_res, item_p));
         /*
          * With v->processor modified we must not
          * - make any further changes assuming we hold the scheduler lock,
@@ -498,15 +504,13 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
          */
         spin_unlock_irq(lock);
 
-        v->sched_item->priv = vcpu_priv[v->vcpu_id];
+        item->priv = item_priv[item->item_id];
         if ( !d->is_dying )
             sched_move_irqs(v->sched_item);
 
-        new_p = cpumask_cycle(new_p, c->cpu_valid);
+        SCHED_OP(c->sched, insert_item, item);
 
-        SCHED_OP(c->sched, insert_item, v->sched_item);
-
-        SCHED_OP(old_ops, free_vdata, vcpudata);
+        SCHED_OP(old_ops, free_vdata, itemdata);
     }
 
     domain_update_node_affinity(d);
@@ -515,7 +519,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
 
     sched_free_domdata(old_ops, old_domdata);
 
-    xfree(vcpu_priv);
+    xfree(item_priv);
 
     return 0;
 }
@@ -822,15 +826,14 @@ void vcpu_force_reschedule(struct vcpu *v)
 void restore_vcpu_affinity(struct domain *d)
 {
     unsigned int cpu = smp_processor_id();
-    struct vcpu *v;
+    struct sched_item *item;
 
     ASSERT(system_state == SYS_STATE_resume);
 
-    for_each_vcpu ( d, v )
+    for_each_sched_item ( d, item )
     {
         spinlock_t *lock;
-        unsigned int old_cpu = v->processor;
-        struct sched_item *item = v->sched_item;
+        unsigned int old_cpu = sched_item_cpu(item);
         struct sched_resource *res;
 
         ASSERT(!item_runnable(item));
@@ -849,7 +852,8 @@ void restore_vcpu_affinity(struct domain *d)
         {
             if ( item->affinity_broken )
             {
-                sched_set_affinity(v, item->cpu_hard_affinity_saved, NULL);
+                sched_set_affinity(item->vcpu, item->cpu_hard_affinity_saved,
+                                   NULL);
                 item->affinity_broken = 0;
                 cpumask_and(cpumask_scratch_cpu(cpu), item->cpu_hard_affinity,
                             cpupool_domain_cpumask(d));
@@ -857,8 +861,8 @@ void restore_vcpu_affinity(struct domain *d)
 
             if ( cpumask_empty(cpumask_scratch_cpu(cpu)) )
             {
-                printk(XENLOG_DEBUG "Breaking affinity for %pv\n", v);
-                sched_set_affinity(v, &cpumask_all, NULL);
+                printk(XENLOG_DEBUG "Breaking affinity for %pv\n", item->vcpu);
+                sched_set_affinity(item->vcpu, &cpumask_all, NULL);
                 cpumask_and(cpumask_scratch_cpu(cpu), item->cpu_hard_affinity,
                             cpupool_domain_cpumask(d));
             }
@@ -868,12 +872,12 @@ void restore_vcpu_affinity(struct domain *d)
         sched_set_res(item, res);
 
         lock = item_schedule_lock_irq(item);
-        res = SCHED_OP(vcpu_scheduler(v), pick_resource, item);
+        res = SCHED_OP(vcpu_scheduler(item->vcpu), pick_resource, item);
         sched_set_res(item, res);
         spin_unlock_irq(lock);
 
-        if ( old_cpu != v->processor )
-            sched_move_irqs(v->sched_item);
+        if ( old_cpu != sched_item_cpu(item) )
+            sched_move_irqs(item);
     }
 
     domain_update_node_affinity(d);
@@ -886,7 +890,6 @@ void restore_vcpu_affinity(struct domain *d)
 int cpu_disable_scheduler(unsigned int cpu)
 {
     struct domain *d;
-    struct vcpu *v;
     struct cpupool *c;
     cpumask_t online_affinity;
     int ret = 0;
@@ -903,10 +906,11 @@ int cpu_disable_scheduler(unsigned int cpu)
      */
     for_each_domain_in_cpupool ( d, c )
     {
-        for_each_vcpu ( d, v )
+        struct sched_item *item;
+
+        for_each_sched_item ( d, item )
         {
             unsigned long flags;
-            struct sched_item *item = v->sched_item;
             spinlock_t *lock = item_schedule_lock_irqsave(item, &flags);
 
             cpumask_and(&online_affinity, item->cpu_hard_affinity, c->cpu_valid);
@@ -921,14 +925,14 @@ int cpu_disable_scheduler(unsigned int cpu)
                     break;
                 }
 
-                printk(XENLOG_DEBUG "Breaking affinity for %pv\n", v);
+                printk(XENLOG_DEBUG "Breaking affinity for %pv\n", item->vcpu);
 
-                sched_set_affinity(v, &cpumask_all, NULL);
+                sched_set_affinity(item->vcpu, &cpumask_all, NULL);
             }
 
-            if ( v->processor != cpu )
+            if ( sched_item_cpu(item) != sched_get_resource_cpu(cpu) )
             {
-                /* The vcpu is not on this cpu, so we can move on. */
+                /* The item is not on this cpu, so we can move on. */
                 item_schedule_unlock_irqrestore(lock, flags, item);
                 continue;
             }
@@ -941,17 +945,17 @@ int cpu_disable_scheduler(unsigned int cpu)
              *  * the scheduler will always find a suitable solution, or
              *    things would have failed before getting in here.
              */
-            vcpu_migrate_start(v);
+            vcpu_migrate_start(item->vcpu);
             item_schedule_unlock_irqrestore(lock, flags, item);
 
-            vcpu_migrate_finish(v);
+            vcpu_migrate_finish(item->vcpu);
 
             /*
              * The only caveat, in this case, is that if a vcpu active in
              * the hypervisor isn't migratable. In this case, the caller
              * should try again after releasing and reaquiring all locks.
              */
-            if ( v->processor == cpu )
+            if ( sched_item_cpu(item) == sched_get_resource_cpu(cpu) )
                 ret = -EAGAIN;
         }
     }
