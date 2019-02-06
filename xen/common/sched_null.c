@@ -709,6 +709,7 @@ static struct task_slice null_schedule(const struct scheduler *ops,
 {
     unsigned int bs;
     const unsigned int cpu = smp_processor_id();
+    const unsigned int sched_cpu = sched_get_resource_cpu(cpu);
     struct null_private *prv = null_priv(ops);
     struct null_item *wvc;
     struct task_slice ret;
@@ -724,14 +725,14 @@ static struct task_slice null_schedule(const struct scheduler *ops,
         } d;
         d.cpu = cpu;
         d.tasklet = tasklet_work_scheduled;
-        if ( per_cpu(npc, cpu).item == NULL )
+        if ( per_cpu(npc, sched_cpu).item == NULL )
         {
             d.item = d.dom = -1;
         }
         else
         {
-            d.item = per_cpu(npc, cpu).item->item_id;
-            d.dom = per_cpu(npc, cpu).item->domain->domain_id;
+            d.item = per_cpu(npc, sched_cpu).item->item_id;
+            d.dom = per_cpu(npc, sched_cpu).item->domain->domain_id;
         }
         __trace_var(TRC_SNULL_SCHEDULE, 1, sizeof(d), &d);
     }
@@ -739,10 +740,10 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     if ( tasklet_work_scheduled )
     {
         trace_var(TRC_SNULL_TASKLET, 1, 0, NULL);
-        ret.task = sched_idle_item(cpu);
+        ret.task = sched_idle_item(sched_cpu);
     }
     else
-        ret.task = per_cpu(npc, cpu).item;
+        ret.task = per_cpu(npc, sched_cpu).item;
     ret.migrated = 0;
     ret.time = -1;
 
@@ -773,9 +774,9 @@ static struct task_slice null_schedule(const struct scheduler *ops,
                      !has_soft_affinity(wvc->item) )
                     continue;
 
-                if ( item_check_affinity(wvc->item, cpu, bs) )
+                if ( item_check_affinity(wvc->item, sched_cpu, bs) )
                 {
-                    item_assign(prv, wvc->item, cpu);
+                    item_assign(prv, wvc->item, sched_cpu);
                     list_del_init(&wvc->waitq_elem);
                     ret.task = wvc->item;
                     goto unlock;
@@ -787,7 +788,7 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     }
 
     if ( unlikely(ret.task == NULL || !item_runnable(ret.task)) )
-        ret.task = sched_idle_item(cpu);
+        ret.task = sched_idle_item(sched_cpu);
 
     NULL_ITEM_CHECK(ret.task);
     return ret;
