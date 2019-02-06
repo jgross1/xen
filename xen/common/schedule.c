@@ -334,7 +334,7 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     /* Idle VCPUs are scheduled immediately, so don't put them in runqueue. */
     if ( is_idle_domain(d) )
     {
-        per_cpu(schedule_data, v->processor).curr = v;
+        per_cpu(schedule_data, v->processor).curr = item;
         v->is_running = 1;
     }
     else
@@ -1513,7 +1513,7 @@ static void schedule(void)
 
     next = next_slice.task;
 
-    sd->curr = next;
+    sd->curr = next->sched_item;
 
     if ( next_slice.time >= 0 ) /* -ve means no limit */
         set_timer(&sd->s_timer, now + next_slice.time);
@@ -1636,7 +1636,6 @@ static int cpu_schedule_up(unsigned int cpu)
     per_cpu(scheduler, cpu) = &ops;
     spin_lock_init(&sd->_lock);
     sd->schedule_lock = &sd->_lock;
-    sd->curr = idle_vcpu[cpu];
     init_timer(&sd->s_timer, s_timer_fn, NULL, cpu);
     atomic_set(&sd->urgent_count, 0);
 
@@ -1669,6 +1668,8 @@ static int cpu_schedule_up(unsigned int cpu)
     }
     if ( idle_vcpu[cpu] == NULL )
         return -ENOMEM;
+
+    sd->curr = idle_vcpu[cpu]->sched_item;
 
     /*
      * We don't want to risk calling xfree() on an sd->sched_priv
@@ -1839,6 +1840,7 @@ void __init scheduler_init(void)
     idle_domain->max_vcpus = nr_cpu_ids;
     if ( vcpu_create(idle_domain, 0, 0) == NULL )
         BUG();
+    this_cpu(schedule_data).curr = idle_vcpu[0]->sched_item;
     this_cpu(schedule_data).sched_priv = sched_alloc_pdata(&ops, 0);
     BUG_ON(IS_ERR(this_cpu(schedule_data).sched_priv));
     sched_init_pdata(&ops, this_cpu(schedule_data).sched_priv, 0);
