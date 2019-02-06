@@ -23,6 +23,8 @@
 #include <xen/event.h>
 #include <xen/kernel.h>
 #include <xen/keyhandler.h>
+#include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/vm_event.h>
 #include <asm/current.h>
 #include <asm/cpufeature.h>
@@ -562,7 +564,7 @@ void vmx_vmcs_reload(struct vcpu *v)
      * v->arch.hvm.vmx.vmcs_lock here. However, with interrupts disabled
      * the VMCS can't be taken away from us anymore if we still own it.
      */
-    ASSERT(v->is_running || !local_irq_is_enabled());
+    ASSERT(vcpu_running(v) || !local_irq_is_enabled());
     if ( v->arch.hvm.vmx.vmcs_pa == this_cpu(current_vmcs) )
         return;
 
@@ -1576,7 +1578,7 @@ void vmx_vcpu_flush_pml_buffer(struct vcpu *v)
     uint64_t *pml_buf;
     unsigned long pml_idx;
 
-    ASSERT((v == current) || (!vcpu_runnable(v) && !v->is_running));
+    ASSERT((v == current) || (!vcpu_runnable(v) && !vcpu_running(v)));
     ASSERT(vmx_vcpu_pml_enabled(v));
 
     vmx_vmcs_enter(v);

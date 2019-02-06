@@ -6,6 +6,7 @@
  */
 
 #include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/version.h>
 #include <xen/hypercall.h>
 #include <xen/domain_page.h>
@@ -539,7 +540,7 @@ int viridian_hypercall(struct cpu_user_regs *regs)
                 continue;
 
             hvm_asid_flush_vcpu(v);
-            if ( v != curr && v->is_running )
+            if ( v != curr && vcpu_running(v) )
                 __cpumask_set_cpu(v->processor, pcpu_mask);
         }
 

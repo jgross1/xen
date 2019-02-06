@@ -173,7 +173,7 @@ void getdomaininfo(struct domain *d, struct xen_domctl_getdomaininfo *info)
         {
             if ( !(v->pause_flags & VPF_blocked) )
                 flags &= ~XEN_DOMINF_blocked;
-            if ( v->is_running )
+            if ( vcpu_running(v) )
                 flags |= XEN_DOMINF_running;
             info->nr_online_vcpus++;
         }
@@ -840,7 +840,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
 
         op->u.getvcpuinfo.online   = !(v->pause_flags & VPF_down);
         op->u.getvcpuinfo.blocked  = !!(v->pause_flags & VPF_blocked);
-        op->u.getvcpuinfo.running  = v->is_running;
+        op->u.getvcpuinfo.running  = vcpu_running(v);
         op->u.getvcpuinfo.cpu_time = runstate.time[RUNSTATE_running];
         op->u.getvcpuinfo.cpu      = v->processor;
         ret = 0;

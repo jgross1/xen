@@ -59,8 +59,12 @@ struct sched_item {
 
     /* Last time when item has been scheduled out. */
     uint64_t               last_run_time;
+    /* Last time item got (de-)scheduled. */
+    uint64_t               state_entry_time;
 
-    /* Item needs affinity restored. */
+    /* Currently running on a CPU? */
+    bool                   is_running;
+    /* Item needs affinity restored */
     bool                   affinity_broken;
     /* Does soft affinity actually play a role (given hard affinity)? */
     bool                   soft_aff_effective;
@@ -130,6 +134,11 @@ static inline void sched_clear_pause_flags_atomic(struct sched_item *item,
 static inline struct sched_item *sched_idle_item(unsigned int cpu)
 {
     return idle_vcpu[cpu]->sched_item;
+}
+
+static inline bool vcpu_running(struct vcpu *v)
+{
+    return v->sched_item->is_running;
 }
 
 /*

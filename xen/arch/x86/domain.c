@@ -2157,7 +2157,7 @@ void vcpu_kick(struct vcpu *v)
      * NB2. We save the running flag across the unblock to avoid a needless
      * IPI for domains that we IPI'd to unblock.
      */
-    bool running = v->is_running;
+    bool running = vcpu_running(v);
 
     vcpu_unblock(v);
     if ( running && (in_irq() || (v != current)) )

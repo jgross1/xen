@@ -181,8 +181,6 @@ struct vcpu
     bool             fpu_dirtied;
     /* Initialization completed for this VCPU? */
     bool             is_initialised;
-    /* Currently running on a CPU? */
-    bool             is_running;
     /* VCPU should wake fast (do not deep sleep the CPU). */
     bool             is_urgent;
 

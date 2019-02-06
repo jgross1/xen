@@ -1282,7 +1282,7 @@ runq_insert(const struct scheduler *ops, struct csched2_item *svc)
 
     ASSERT(&svc->rqd->runq == runq);
     ASSERT(!is_idle_vcpu(svc->vcpu));
-    ASSERT(!svc->vcpu->is_running);
+    ASSERT(!vcpu_running(svc->vcpu));
     ASSERT(!(svc->flags & CSFLAG_scheduled));
 
     list_for_each( iter, runq )
@@ -1339,8 +1339,8 @@ static inline bool is_preemptable(const struct csched2_item *svc,
     if ( ratelimit <= CSCHED2_RATELIMIT_TICKLE_TOLERANCE )
         return true;
 
-    ASSERT(svc->vcpu->is_running);
-    return now - svc->vcpu->runstate.state_entry_time >
+    ASSERT(vcpu_running(svc->vcpu));
+    return now - svc->vcpu->sched_item->state_entry_time >
            ratelimit - CSCHED2_RATELIMIT_TICKLE_TOLERANCE;
 }
 
@@ -2930,7 +2930,7 @@ csched2_dom_cntl(
                 {
                     svc = csched2_item(v->sched_item);
                     lock = item_schedule_lock(svc->vcpu->sched_item);
-                    if ( v->is_running )
+                    if ( vcpu_running(v) )
                     {
                         unsigned int cpu = v->processor;
                         struct csched2_runqueue_data *rqd = c2rqd(ops, cpu);
@@ -3203,8 +3203,8 @@ csched2_runtime(const struct scheduler *ops, int cpu,
     if ( prv->ratelimit_us )
     {
         s_time_t ratelimit_min = MICROSECS(prv->ratelimit_us);
-        if ( snext->vcpu->is_running )
-            ratelimit_min = snext->vcpu->runstate.state_entry_time +
+        if ( vcpu_running(snext->vcpu) )
+            ratelimit_min = snext->vcpu->sched_item->state_entry_time +
                             MICROSECS(prv->ratelimit_us) - now;
         if ( ratelimit_min > min_time )
             min_time = ratelimit_min;
@@ -3301,7 +3301,7 @@ runq_candidate(struct csched2_runqueue_data *rqd,
      * no point forcing it to do so until rate limiting expires.
      */
     if ( !yield && prv->ratelimit_us && vcpu_runnable(scurr->vcpu) &&
-         (now - scurr->vcpu->runstate.state_entry_time) <
+         (now - scurr->vcpu->sched_item->state_entry_time) <
           MICROSECS(prv->ratelimit_us) )
     {
         if ( unlikely(tb_init_done) )
@@ -3312,7 +3312,7 @@ runq_candidate(struct csched2_runqueue_data *rqd,
             } d;
             d.dom = scurr->vcpu->domain->domain_id;
             d.vcpu = scurr->vcpu->vcpu_id;
-            d.runtime = now - scurr->vcpu->runstate.state_entry_time;
+            d.runtime = now - scurr->vcpu->sched_item->state_entry_time;
             __trace_var(TRC_CSCHED2_RATELIMIT, 1,
                         sizeof(d),
                         (unsigned char *)&d);
@@ -3560,7 +3560,7 @@ csched2_schedule(
         if ( snext != scurr )
         {
             ASSERT(snext->rqd == rqd);
-            ASSERT(!snext->vcpu->is_running);
+            ASSERT(!vcpu_running(snext->vcpu));
 
             runq_remove(snext);
             __set_bit(__CSFLAG_scheduled, &snext->flags);

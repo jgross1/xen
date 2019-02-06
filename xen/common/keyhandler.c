@@ -306,7 +306,7 @@ static void dump_domains(unsigned char key)
             printk("    VCPU%d: CPU%d [has=%c] poll=%d "
                    "upcall_pend=%02x upcall_mask=%02x ",
                    v->vcpu_id, v->processor,
-                   v->is_running ? 'T':'F', v->poll_evtchn,
+                   vcpu_running(v) ? 'T':'F', v->poll_evtchn,
                    vcpu_info(v, evtchn_upcall_pending),
                    !vcpu_event_delivery_is_enabled(v));
             if ( vcpu_cpu_dirty(v) )
