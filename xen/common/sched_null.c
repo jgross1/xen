@@ -18,10 +18,10 @@
 
 /*
  * The 'null' scheduler always choose to run, on each pCPU, either nothing
- * (i.e., the pCPU stays idle) or always the same vCPU.
+ * (i.e., the pCPU stays idle) or always the same Item.
  *
  * It is aimed at supporting static scenarios, where there always are
- * less vCPUs than pCPUs (and the vCPUs don't need to move among pCPUs
+ * less Items than pCPUs (and the Items don't need to move among pCPUs
  * for any reason) with the least possible overhead.
  *
  * Typical usecase are embedded applications, but also HPC, especially
@@ -38,8 +38,8 @@
  * null tracing events. Check include/public/trace.h for more details.
  */
 #define TRC_SNULL_PICKED_CPU    TRC_SCHED_CLASS_EVT(SNULL, 1)
-#define TRC_SNULL_VCPU_ASSIGN   TRC_SCHED_CLASS_EVT(SNULL, 2)
-#define TRC_SNULL_VCPU_DEASSIGN TRC_SCHED_CLASS_EVT(SNULL, 3)
+#define TRC_SNULL_ITEM_ASSIGN   TRC_SCHED_CLASS_EVT(SNULL, 2)
+#define TRC_SNULL_ITEM_DEASSIGN TRC_SCHED_CLASS_EVT(SNULL, 3)
 #define TRC_SNULL_MIGRATE       TRC_SCHED_CLASS_EVT(SNULL, 4)
 #define TRC_SNULL_SCHEDULE      TRC_SCHED_CLASS_EVT(SNULL, 5)
 #define TRC_SNULL_TASKLET       TRC_SCHED_CLASS_EVT(SNULL, 6)
@@ -48,13 +48,13 @@
  * Locking:
  * - Scheduler-lock (a.k.a. runqueue lock):
  *  + is per-pCPU;
- *  + serializes assignment and deassignment of vCPUs to a pCPU.
+ *  + serializes assignment and deassignment of Items to a pCPU.
  * - Private data lock (a.k.a. private scheduler lock):
  *  + is scheduler-wide;
  *  + serializes accesses to the list of domains in this scheduler.
  * - Waitqueue lock:
  *  + is scheduler-wide;
- *  + serialize accesses to the list of vCPUs waiting to be assigned
+ *  + serialize accesses to the list of Items waiting to be assigned
  *    to pCPUs.
  *
  * Ordering is: private lock, runqueue lock, waitqueue lock. Or, OTOH,
@@ -78,25 +78,25 @@
 struct null_private {
     spinlock_t lock;        /* scheduler lock; nests inside cpupool_lock */
     struct list_head ndom;  /* Domains of this scheduler                 */
-    struct list_head waitq; /* vCPUs not assigned to any pCPU            */
+    struct list_head waitq; /* Items not assigned to any pCPU            */
     spinlock_t waitq_lock;  /* serializes waitq; nests inside runq locks */
-    cpumask_t cpus_free;    /* CPUs without a vCPU associated to them    */
+    cpumask_t cpus_free;    /* CPUs without a Item associated to them    */
 };
 
 /*
  * Physical CPU
  */
 struct null_pcpu {
-    struct vcpu *vcpu;
+    struct sched_item *item;
 };
 DEFINE_PER_CPU(struct null_pcpu, npc);
 
 /*
- * Virtual CPU
+ * Schedule Item
  */
 struct null_item {
     struct list_head waitq_elem;
-    struct vcpu *vcpu;
+    struct sched_item *item;
 };
 
 /*
@@ -120,13 +120,13 @@ static inline struct null_item *null_item(const struct sched_item *item)
     return item->priv;
 }
 
-static inline bool vcpu_check_affinity(struct vcpu *v, unsigned int cpu,
+static inline bool item_check_affinity(struct sched_item *item,
+                                       unsigned int cpu,
                                        unsigned int balance_step)
 {
-    affinity_balance_cpumask(v->sched_item, balance_step,
-                             cpumask_scratch_cpu(cpu));
+    affinity_balance_cpumask(item, balance_step, cpumask_scratch_cpu(cpu));
     cpumask_and(cpumask_scratch_cpu(cpu), cpumask_scratch_cpu(cpu),
-                cpupool_domain_cpumask(v->domain));
+                cpupool_domain_cpumask(item->domain));
 
     return cpumask_test_cpu(cpu, cpumask_scratch_cpu(cpu));
 }
@@ -161,9 +161,9 @@ static void null_deinit(struct scheduler *ops)
 
 static void init_pdata(struct null_private *prv, unsigned int cpu)
 {
-    /* Mark the pCPU as free, and with no vCPU assigned */
+    /* Mark the pCPU as free, and with no item assigned */
     cpumask_set_cpu(cpu, &prv->cpus_free);
-    per_cpu(npc, cpu).vcpu = NULL;
+    per_cpu(npc, cpu).item = NULL;
 }
 
 static void null_init_pdata(const struct scheduler *ops, void *pdata, int cpu)
@@ -191,13 +191,12 @@ static void null_deinit_pdata(const struct scheduler *ops, void *pcpu, int cpu)
     ASSERT(!pcpu);
 
     cpumask_clear_cpu(cpu, &prv->cpus_free);
-    per_cpu(npc, cpu).vcpu = NULL;
+    per_cpu(npc, cpu).item = NULL;
 }
 
 static void *null_alloc_vdata(const struct scheduler *ops,
                               struct sched_item *item, void *dd)
 {
-    struct vcpu *v = item->vcpu;
     struct null_item *nvc;
 
     nvc = xzalloc(struct null_item);
@@ -205,7 +204,7 @@ static void *null_alloc_vdata(const struct scheduler *ops,
         return NULL;
 
     INIT_LIST_HEAD(&nvc->waitq_elem);
-    nvc->vcpu = v;
+    nvc->item = item;
 
     SCHED_STAT_CRANK(item_alloc);
 
@@ -257,15 +256,15 @@ static void null_free_domdata(const struct scheduler *ops, void *data)
 }
 
 /*
- * vCPU to pCPU assignment and placement. This _only_ happens:
+ * item to pCPU assignment and placement. This _only_ happens:
  *  - on insert,
  *  - on migrate.
  *
- * Insert occurs when a vCPU joins this scheduler for the first time
+ * Insert occurs when a item joins this scheduler for the first time
  * (e.g., when the domain it's part of is moved to the scheduler's
  * cpupool).
  *
- * Migration may be necessary if a pCPU (with a vCPU assigned to it)
+ * Migration may be necessary if a pCPU (with a item assigned to it)
  * is removed from the scheduler's cpupool.
  *
  * So this is not part of any hot path.
@@ -274,9 +273,8 @@ static struct sched_resource *
 pick_res(struct null_private *prv, struct sched_item *item)
 {
     unsigned int bs;
-    struct vcpu *v = item->vcpu;
-    unsigned int cpu = v->processor, new_cpu;
-    cpumask_t *cpus = cpupool_domain_cpumask(v->domain);
+    unsigned int cpu = sched_item_cpu(item), new_cpu;
+    cpumask_t *cpus = cpupool_domain_cpumask(item->domain);
 
     ASSERT(spin_is_locked(per_cpu(sched_res, cpu)->schedule_lock));
 
@@ -291,11 +289,12 @@ pick_res(struct null_private *prv, struct sched_item *item)
         /*
          * If our processor is free, or we are assigned to it, and it is also
          * still valid and part of our affinity, just go for it.
-         * (Note that we may call vcpu_check_affinity(), but we deliberately
+         * (Note that we may call item_check_affinity(), but we deliberately
          * don't, so we get to keep in the scratch cpumask what we have just
          * put in it.)
          */
-        if ( likely((per_cpu(npc, cpu).vcpu == NULL || per_cpu(npc, cpu).vcpu == v)
+        if ( likely((per_cpu(npc, cpu).item == NULL ||
+                     per_cpu(npc, cpu).item == item)
                     && cpumask_test_cpu(cpu, cpumask_scratch_cpu(cpu))) )
         {
             new_cpu = cpu;
@@ -313,13 +312,13 @@ pick_res(struct null_private *prv, struct sched_item *item)
 
     /*
      * If we didn't find any free pCPU, just pick any valid pcpu, even if
-     * it has another vCPU assigned. This will happen during shutdown and
+     * it has another Item assigned. This will happen during shutdown and
      * suspend/resume, but it may also happen during "normal operation", if
      * all the pCPUs are busy.
      *
      * In fact, there must always be something sane in v->processor, or
      * item_schedule_lock() and friends won't work. This is not a problem,
-     * as we will actually assign the vCPU to the pCPU we return from here,
+     * as we will actually assign the Item to the pCPU we return from here,
      * only if the pCPU is free.
      */
     cpumask_and(cpumask_scratch_cpu(cpu), cpus, item->cpu_hard_affinity);
@@ -329,11 +328,11 @@ pick_res(struct null_private *prv, struct sched_item *item)
     if ( unlikely(tb_init_done) )
     {
         struct {
-            uint16_t vcpu, dom;
+            uint16_t item, dom;
             uint32_t new_cpu;
         } d;
-        d.dom = v->domain->domain_id;
-        d.vcpu = v->vcpu_id;
+        d.dom = item->domain->domain_id;
+        d.item = item->item_id;
         d.new_cpu = new_cpu;
         __trace_var(TRC_SNULL_PICKED_CPU, 1, sizeof(d), &d);
     }
@@ -341,47 +340,47 @@ pick_res(struct null_private *prv, struct sched_item *item)
     return per_cpu(sched_res, new_cpu);
 }
 
-static void vcpu_assign(struct null_private *prv, struct vcpu *v,
+static void item_assign(struct null_private *prv, struct sched_item *item,
                         unsigned int cpu)
 {
-    per_cpu(npc, cpu).vcpu = v;
-    v->processor = cpu;
-    v->sched_item->res = per_cpu(sched_res, cpu);
+    per_cpu(npc, cpu).item = item;
+    sched_set_res(item, per_cpu(sched_res, cpu));
     cpumask_clear_cpu(cpu, &prv->cpus_free);
 
-    dprintk(XENLOG_G_INFO, "%d <-- %pv\n", cpu, v);
+    dprintk(XENLOG_G_INFO, "%d <-- %pdv%d\n", cpu, item->domain, item->item_id);
 
     if ( unlikely(tb_init_done) )
     {
         struct {
-            uint16_t vcpu, dom;
+            uint16_t item, dom;
             uint32_t cpu;
         } d;
-        d.dom = v->domain->domain_id;
-        d.vcpu = v->vcpu_id;
+        d.dom = item->domain->domain_id;
+        d.item = item->item_id;
         d.cpu = cpu;
-        __trace_var(TRC_SNULL_VCPU_ASSIGN, 1, sizeof(d), &d);
+        __trace_var(TRC_SNULL_ITEM_ASSIGN, 1, sizeof(d), &d);
     }
 }
 
-static void vcpu_deassign(struct null_private *prv, struct vcpu *v,
+static void item_deassign(struct null_private *prv, struct sched_item *item,
                           unsigned int cpu)
 {
-    per_cpu(npc, cpu).vcpu = NULL;
+    per_cpu(npc, cpu).item = NULL;
     cpumask_set_cpu(cpu, &prv->cpus_free);
 
-    dprintk(XENLOG_G_INFO, "%d <-- NULL (%pv)\n", cpu, v);
+    dprintk(XENLOG_G_INFO, "%d <-- NULL (%pdv%d)\n", cpu, item->domain,
+            item->item_id);
 
     if ( unlikely(tb_init_done) )
     {
         struct {
-            uint16_t vcpu, dom;
+            uint16_t item, dom;
             uint32_t cpu;
         } d;
-        d.dom = v->domain->domain_id;
-        d.vcpu = v->vcpu_id;
+        d.dom = item->domain->domain_id;
+        d.item = item->item_id;
         d.cpu = cpu;
-        __trace_var(TRC_SNULL_VCPU_DEASSIGN, 1, sizeof(d), &d);
+        __trace_var(TRC_SNULL_ITEM_DEASSIGN, 1, sizeof(d), &d);
     }
 }
 
@@ -393,9 +392,9 @@ static void null_switch_sched(struct scheduler *new_ops, unsigned int cpu,
     struct null_private *prv = null_priv(new_ops);
     struct null_item *nvc = vdata;
 
-    ASSERT(nvc && is_idle_vcpu(nvc->vcpu));
+    ASSERT(nvc && is_idle_item(nvc->item));
 
-    idle_vcpu[cpu]->sched_item->priv = vdata;
+    sched_idle_item(cpu)->priv = vdata;
 
     /*
      * We are holding the runqueue lock already (it's been taken in
@@ -421,35 +420,34 @@ static void null_switch_sched(struct scheduler *new_ops, unsigned int cpu,
 static void null_item_insert(const struct scheduler *ops,
                              struct sched_item *item)
 {
-    struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
     struct null_item *nvc = null_item(item);
     unsigned int cpu;
     spinlock_t *lock;
 
-    ASSERT(!is_idle_vcpu(v));
+    ASSERT(!is_idle_item(item));
 
     lock = item_schedule_lock_irq(item);
  retry:
 
-    item->res = pick_res(prv, item);
-    cpu = v->processor = item->res->processor;
+    sched_set_res(item, pick_res(prv, item));
+    cpu = sched_item_cpu(item);
 
     spin_unlock(lock);
 
     lock = item_schedule_lock(item);
 
     cpumask_and(cpumask_scratch_cpu(cpu), item->cpu_hard_affinity,
-                cpupool_domain_cpumask(v->domain));
+                cpupool_domain_cpumask(item->domain));
 
-    /* If the pCPU is free, we assign v to it */
-    if ( likely(per_cpu(npc, cpu).vcpu == NULL) )
+    /* If the pCPU is free, we assign item to it */
+    if ( likely(per_cpu(npc, cpu).item == NULL) )
     {
         /*
          * Insert is followed by vcpu_wake(), so there's no need to poke
          * the pcpu with the SCHEDULE_SOFTIRQ, as wake will do that.
          */
-        vcpu_assign(prv, v, cpu);
+        item_assign(prv, item, cpu);
     }
     else if ( cpumask_intersects(&prv->cpus_free, cpumask_scratch_cpu(cpu)) )
     {
@@ -468,7 +466,8 @@ static void null_item_insert(const struct scheduler *ops,
          */
         spin_lock(&prv->waitq_lock);
         list_add_tail(&nvc->waitq_elem, &prv->waitq);
-        dprintk(XENLOG_G_WARNING, "WARNING: %pv not assigned to any CPU!\n", v);
+        dprintk(XENLOG_G_WARNING, "WARNING: %pdv%d not assigned to any CPU!\n",
+                item->domain, item->item_id);
         spin_unlock(&prv->waitq_lock);
     }
     spin_unlock_irq(lock);
@@ -476,35 +475,34 @@ static void null_item_insert(const struct scheduler *ops,
     SCHED_STAT_CRANK(item_insert);
 }
 
-static void _vcpu_remove(struct null_private *prv, struct vcpu *v)
+static void _item_remove(struct null_private *prv, struct sched_item *item)
 {
     unsigned int bs;
-    unsigned int cpu = v->processor;
+    unsigned int cpu = sched_item_cpu(item);
     struct null_item *wvc;
 
-    ASSERT(list_empty(&null_item(v->sched_item)->waitq_elem));
+    ASSERT(list_empty(&null_item(item)->waitq_elem));
 
-    vcpu_deassign(prv, v, cpu);
+    item_deassign(prv, item, cpu);
 
     spin_lock(&prv->waitq_lock);
 
     /*
-     * If v is assigned to a pCPU, let's see if there is someone waiting,
-     * suitable to be assigned to it (prioritizing vcpus that have
+     * If item is assigned to a pCPU, let's see if there is someone waiting,
+     * suitable to be assigned to it (prioritizing items that have
      * soft-affinity with cpu).
      */
     for_each_affinity_balance_step( bs )
     {
         list_for_each_entry( wvc, &prv->waitq, waitq_elem )
         {
-            if ( bs == BALANCE_SOFT_AFFINITY &&
-                 !has_soft_affinity(wvc->vcpu->sched_item) )
+            if ( bs == BALANCE_SOFT_AFFINITY && !has_soft_affinity(wvc->item) )
                 continue;
 
-            if ( vcpu_check_affinity(wvc->vcpu, cpu, bs) )
+            if ( item_check_affinity(wvc->item, cpu, bs) )
             {
                 list_del_init(&wvc->waitq_elem);
-                vcpu_assign(prv, wvc->vcpu, cpu);
+                item_assign(prv, wvc->item, cpu);
                 cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
                 spin_unlock(&prv->waitq_lock);
                 return;
@@ -517,16 +515,15 @@ static void _vcpu_remove(struct null_private *prv, struct vcpu *v)
 static void null_item_remove(const struct scheduler *ops,
                              struct sched_item *item)
 {
-    struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
     struct null_item *nvc = null_item(item);
     spinlock_t *lock;
 
-    ASSERT(!is_idle_vcpu(v));
+    ASSERT(!is_idle_item(item));
 
     lock = item_schedule_lock_irq(item);
 
-    /* If v is in waitqueue, just get it out of there and bail */
+    /* If item is in waitqueue, just get it out of there and bail */
     if ( unlikely(!list_empty(&nvc->waitq_elem)) )
     {
         spin_lock(&prv->waitq_lock);
@@ -536,10 +533,10 @@ static void null_item_remove(const struct scheduler *ops,
         goto out;
     }
 
-    ASSERT(per_cpu(npc, v->processor).vcpu == v);
-    ASSERT(!cpumask_test_cpu(v->processor, &prv->cpus_free));
+    ASSERT(per_cpu(npc, sched_item_cpu(item)).item == item);
+    ASSERT(!cpumask_test_cpu(sched_item_cpu(item), &prv->cpus_free));
 
-    _vcpu_remove(prv, v);
+    _item_remove(prv, item);
 
  out:
     item_schedule_unlock_irq(lock, item);
@@ -550,11 +547,9 @@ static void null_item_remove(const struct scheduler *ops,
 static void null_item_wake(const struct scheduler *ops,
                            struct sched_item *item)
 {
-    struct vcpu *v = item->vcpu;
+    ASSERT(!is_idle_item(item));
 
-    ASSERT(!is_idle_vcpu(v));
-
-    if ( unlikely(curr_on_cpu(v->processor) == item) )
+    if ( unlikely(curr_on_cpu(sched_item_cpu(item)) == item) )
     {
         SCHED_STAT_CRANK(item_wake_running);
         return;
@@ -567,25 +562,23 @@ static void null_item_wake(const struct scheduler *ops,
         return;
     }
 
-    if ( likely(vcpu_runnable(v)) )
+    if ( likely(item_runnable(item)) )
         SCHED_STAT_CRANK(item_wake_runnable);
     else
         SCHED_STAT_CRANK(item_wake_not_runnable);
 
-    /* Note that we get here only for vCPUs assigned to a pCPU */
-    cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
+    /* Note that we get here only for items assigned to a pCPU */
+    cpu_raise_softirq(sched_item_cpu(item), SCHEDULE_SOFTIRQ);
 }
 
 static void null_item_sleep(const struct scheduler *ops,
                             struct sched_item *item)
 {
-    struct vcpu *v = item->vcpu;
+    ASSERT(!is_idle_item(item));
 
-    ASSERT(!is_idle_vcpu(v));
-
-    /* If v is not assigned to a pCPU, or is not running, no need to bother */
-    if ( curr_on_cpu(v->processor) == item )
-        cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
+    /* If item isn't assigned to a pCPU, or isn't running, no need to bother */
+    if ( curr_on_cpu(sched_item_cpu(item)) == item )
+        cpu_raise_softirq(sched_item_cpu(item), SCHEDULE_SOFTIRQ);
 
     SCHED_STAT_CRANK(item_sleep);
 }
@@ -593,37 +586,36 @@ static void null_item_sleep(const struct scheduler *ops,
 static struct sched_resource *
 null_res_pick(const struct scheduler *ops, struct sched_item *item)
 {
-    ASSERT(!is_idle_vcpu(item->vcpu));
+    ASSERT(!is_idle_item(item));
     return pick_res(null_priv(ops), item);
 }
 
 static void null_item_migrate(const struct scheduler *ops,
                               struct sched_item *item, unsigned int new_cpu)
 {
-    struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
     struct null_item *nvc = null_item(item);
 
-    ASSERT(!is_idle_vcpu(v));
+    ASSERT(!is_idle_item(item));
 
-    if ( v->processor == new_cpu )
+    if ( sched_item_cpu(item) == new_cpu )
         return;
 
     if ( unlikely(tb_init_done) )
     {
         struct {
-            uint16_t vcpu, dom;
+            uint16_t item, dom;
             uint16_t cpu, new_cpu;
         } d;
-        d.dom = v->domain->domain_id;
-        d.vcpu = v->vcpu_id;
-        d.cpu = v->processor;
+        d.dom = item->domain->domain_id;
+        d.item = item->item_id;
+        d.cpu = sched_item_cpu(item);
         d.new_cpu = new_cpu;
         __trace_var(TRC_SNULL_MIGRATE, 1, sizeof(d), &d);
     }
 
     /*
-     * v is either assigned to a pCPU, or in the waitqueue.
+     * item is either assigned to a pCPU, or in the waitqueue.
      *
      * In the former case, the pCPU to which it was assigned would
      * become free, and we, therefore, should check whether there is
@@ -633,7 +625,7 @@ static void null_item_migrate(const struct scheduler *ops,
      */
     if ( likely(list_empty(&nvc->waitq_elem)) )
     {
-        _vcpu_remove(prv, v);
+        _item_remove(prv, item);
         SCHED_STAT_CRANK(migrate_running);
     }
     else
@@ -642,32 +634,34 @@ static void null_item_migrate(const struct scheduler *ops,
     SCHED_STAT_CRANK(migrated);
 
     /*
-     * Let's now consider new_cpu, which is where v is being sent. It can be
-     * either free, or have a vCPU already assigned to it.
+     * Let's now consider new_cpu, which is where item is being sent. It can be
+     * either free, or have a item already assigned to it.
      *
-     * In the former case, we should assign v to it, and try to get it to run,
+     * In the former case we should assign item to it, and try to get it to run,
      * if possible, according to affinity.
      *
-     * In latter, all we can do is to park v in the waitqueue.
+     * In latter, all we can do is to park item in the waitqueue.
      */
-    if ( per_cpu(npc, new_cpu).vcpu == NULL &&
-         vcpu_check_affinity(v, new_cpu, BALANCE_HARD_AFFINITY) )
+    if ( per_cpu(npc, new_cpu).item == NULL &&
+         item_check_affinity(item, new_cpu, BALANCE_HARD_AFFINITY) )
     {
-        /* v might have been in the waitqueue, so remove it */
+        /* item might have been in the waitqueue, so remove it */
         spin_lock(&prv->waitq_lock);
         list_del_init(&nvc->waitq_elem);
         spin_unlock(&prv->waitq_lock);
 
-        vcpu_assign(prv, v, new_cpu);
+        item_assign(prv, item, new_cpu);
     }
     else
     {
-        /* Put v in the waitqueue, if it wasn't there already */
+        /* Put item in the waitqueue, if it wasn't there already */
         spin_lock(&prv->waitq_lock);
         if ( list_empty(&nvc->waitq_elem) )
         {
             list_add_tail(&nvc->waitq_elem, &prv->waitq);
-            dprintk(XENLOG_G_WARNING, "WARNING: %pv not assigned to any CPU!\n", v);
+            dprintk(XENLOG_G_WARNING,
+                    "WARNING: %pdv%d not assigned to any CPU!\n", item->domain,
+                    item->item_id);
         }
         spin_unlock(&prv->waitq_lock);
     }
@@ -680,35 +674,34 @@ static void null_item_migrate(const struct scheduler *ops,
      * at least. In case of suspend, any temporary inconsistency caused
      * by this, will be fixed-up during resume.
      */
-    v->processor = new_cpu;
-    item->res = per_cpu(sched_res, new_cpu);
+    sched_set_res(item, per_cpu(sched_res, new_cpu));
 }
 
 #ifndef NDEBUG
-static inline void null_vcpu_check(struct vcpu *v)
+static inline void null_item_check(struct sched_item *item)
 {
-    struct null_item * const nvc = null_item(v->sched_item);
-    struct null_dom * const ndom = v->domain->sched_priv;
+    struct null_item * const nvc = null_item(item);
+    struct null_dom * const ndom = item->domain->sched_priv;
 
-    BUG_ON(nvc->vcpu != v);
+    BUG_ON(nvc->item != item);
 
     if ( ndom )
-        BUG_ON(is_idle_vcpu(v));
+        BUG_ON(is_idle_item(item));
     else
-        BUG_ON(!is_idle_vcpu(v));
+        BUG_ON(!is_idle_item(item));
 
     SCHED_STAT_CRANK(item_check);
 }
-#define NULL_VCPU_CHECK(v)  (null_vcpu_check(v))
+#define NULL_ITEM_CHECK(item)  (null_item_check(item))
 #else
-#define NULL_VCPU_CHECK(v)
+#define NULL_ITEM_CHECK(item)
 #endif
 
 
 /*
  * The most simple scheduling function of all times! We either return:
- *  - the vCPU assigned to the pCPU, if there's one and it can run;
- *  - the idle vCPU, otherwise.
+ *  - the item assigned to the pCPU, if there's one and it can run;
+ *  - the idle item, otherwise.
  */
 static struct task_slice null_schedule(const struct scheduler *ops,
                                        s_time_t now,
@@ -721,24 +714,24 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     struct task_slice ret;
 
     SCHED_STAT_CRANK(schedule);
-    NULL_VCPU_CHECK(current);
+    NULL_ITEM_CHECK(current->sched_item);
 
     if ( unlikely(tb_init_done) )
     {
         struct {
             uint16_t tasklet, cpu;
-            int16_t vcpu, dom;
+            int16_t item, dom;
         } d;
         d.cpu = cpu;
         d.tasklet = tasklet_work_scheduled;
-        if ( per_cpu(npc, cpu).vcpu == NULL )
+        if ( per_cpu(npc, cpu).item == NULL )
         {
-            d.vcpu = d.dom = -1;
+            d.item = d.dom = -1;
         }
         else
         {
-            d.vcpu = per_cpu(npc, cpu).vcpu->vcpu_id;
-            d.dom = per_cpu(npc, cpu).vcpu->domain->domain_id;
+            d.item = per_cpu(npc, cpu).item->item_id;
+            d.dom = per_cpu(npc, cpu).item->domain->domain_id;
         }
         __trace_var(TRC_SNULL_SCHEDULE, 1, sizeof(d), &d);
     }
@@ -746,16 +739,16 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     if ( tasklet_work_scheduled )
     {
         trace_var(TRC_SNULL_TASKLET, 1, 0, NULL);
-        ret.task = idle_vcpu[cpu]->sched_item;
+        ret.task = sched_idle_item(cpu);
     }
     else
-        ret.task = per_cpu(npc, cpu).vcpu->sched_item;
+        ret.task = per_cpu(npc, cpu).item;
     ret.migrated = 0;
     ret.time = -1;
 
     /*
      * We may be new in the cpupool, or just coming back online. In which
-     * case, there may be vCPUs in the waitqueue that we can assign to us
+     * case, there may be items in the waitqueue that we can assign to us
      * and run.
      */
     if ( unlikely(ret.task == NULL) )
@@ -766,10 +759,10 @@ static struct task_slice null_schedule(const struct scheduler *ops,
             goto unlock;
 
         /*
-         * We scan the waitqueue twice, for prioritizing vcpus that have
+         * We scan the waitqueue twice, for prioritizing items that have
          * soft-affinity with cpu. This may look like something expensive to
-         * do here in null_schedule(), but it's actually fine, beceuse we do
-         * it only in cases where a pcpu has no vcpu associated (e.g., as
+         * do here in null_schedule(), but it's actually fine, because we do
+         * it only in cases where a pcpu has no item associated (e.g., as
          * said above, the cpu has just joined a cpupool).
          */
         for_each_affinity_balance_step( bs )
@@ -777,14 +770,14 @@ static struct task_slice null_schedule(const struct scheduler *ops,
             list_for_each_entry( wvc, &prv->waitq, waitq_elem )
             {
                 if ( bs == BALANCE_SOFT_AFFINITY &&
-                     !has_soft_affinity(wvc->vcpu->sched_item) )
+                     !has_soft_affinity(wvc->item) )
                     continue;
 
-                if ( vcpu_check_affinity(wvc->vcpu, cpu, bs) )
+                if ( item_check_affinity(wvc->item, cpu, bs) )
                 {
-                    vcpu_assign(prv, wvc->vcpu, cpu);
+                    item_assign(prv, wvc->item, cpu);
                     list_del_init(&wvc->waitq_elem);
-                    ret.task = wvc->vcpu->sched_item;
+                    ret.task = wvc->item;
                     goto unlock;
                 }
             }
@@ -794,17 +787,17 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     }
 
     if ( unlikely(ret.task == NULL || !item_runnable(ret.task)) )
-        ret.task = idle_vcpu[cpu]->sched_item;
+        ret.task = sched_idle_item(cpu);
 
-    NULL_VCPU_CHECK(ret.task->vcpu);
+    NULL_ITEM_CHECK(ret.task);
     return ret;
 }
 
-static inline void dump_vcpu(struct null_private *prv, struct null_item *nvc)
+static inline void dump_item(struct null_private *prv, struct null_item *nvc)
 {
-    printk("[%i.%i] pcpu=%d", nvc->vcpu->domain->domain_id,
-            nvc->vcpu->vcpu_id, list_empty(&nvc->waitq_elem) ?
-                                nvc->vcpu->processor : -1);
+    printk("[%i.%i] pcpu=%d", nvc->item->domain->domain_id,
+            nvc->item->item_id, list_empty(&nvc->waitq_elem) ?
+                                sched_item_cpu(nvc->item) : -1);
 }
 
 static void null_dump_pcpu(const struct scheduler *ops, int cpu)
@@ -820,16 +813,17 @@ static void null_dump_pcpu(const struct scheduler *ops, int cpu)
            cpu,
            nr_cpu_ids, cpumask_bits(per_cpu(cpu_sibling_mask, cpu)),
            nr_cpu_ids, cpumask_bits(per_cpu(cpu_core_mask, cpu)));
-    if ( per_cpu(npc, cpu).vcpu != NULL )
-        printk(", vcpu=%pv", per_cpu(npc, cpu).vcpu);
+    if ( per_cpu(npc, cpu).item != NULL )
+        printk(", item=%pdv%d", per_cpu(npc, cpu).item->domain,
+               per_cpu(npc, cpu).item->item_id);
     printk("\n");
 
-    /* current VCPU (nothing to say if that's the idle vcpu) */
+    /* current item (nothing to say if that's the idle item) */
     nvc = null_item(curr_on_cpu(cpu));
-    if ( nvc && !is_idle_vcpu(nvc->vcpu) )
+    if ( nvc && !is_idle_item(nvc->item) )
     {
         printk("\trun: ");
-        dump_vcpu(prv, nvc);
+        dump_item(prv, nvc);
         printk("\n");
     }
 
@@ -852,23 +846,23 @@ static void null_dump(const struct scheduler *ops)
     list_for_each( iter, &prv->ndom )
     {
         struct null_dom *ndom;
-        struct vcpu *v;
+        struct sched_item *item;
 
         ndom = list_entry(iter, struct null_dom, ndom_elem);
 
         printk("\tDomain: %d\n", ndom->dom->domain_id);
-        for_each_vcpu( ndom->dom, v )
+        for_each_sched_item( ndom->dom, item )
         {
-            struct null_item * const nvc = null_item(v->sched_item);
+            struct null_item * const nvc = null_item(item);
             spinlock_t *lock;
 
-            lock = item_schedule_lock(nvc->vcpu->sched_item);
+            lock = item_schedule_lock(item);
 
             printk("\t%3d: ", ++loop);
-            dump_vcpu(prv, nvc);
+            dump_item(prv, nvc);
             printk("\n");
 
-            item_schedule_unlock(lock, nvc->vcpu->sched_item);
+            item_schedule_unlock(lock, item);
         }
     }
 
@@ -883,7 +877,7 @@ static void null_dump(const struct scheduler *ops)
             printk(", ");
         if ( loop % 24 == 0 )
             printk("\n\t");
-        printk("%pv", nvc->vcpu);
+        printk("%pdv%d", nvc->item->domain, nvc->item->item_id);
     }
     printk("\n");
     spin_unlock(&prv->waitq_lock);
