@@ -23,6 +23,7 @@
 #include <xen/event.h>
 #include <xen/guest_access.h>
 #include <xen/iocap.h>
+#include <xen/sched.h>
 #include <xen/spinlock.h>
 #include <xen/trace.h>
 

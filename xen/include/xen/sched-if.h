@@ -463,11 +463,11 @@ static inline cpumask_t* cpupool_domain_cpumask(struct domain *d)
  * * The hard affinity is not a subset of soft affinity
  * * There is an overlap between the soft and hard affinity masks
  */
-static inline int has_soft_affinity(const struct vcpu *v)
+static inline int has_soft_affinity(const struct sched_item *item)
 {
-    return v->soft_aff_effective &&
-           !cpumask_subset(cpupool_domain_cpumask(v->domain),
-                           v->cpu_soft_affinity);
+    return item->soft_aff_effective &&
+           !cpumask_subset(cpupool_domain_cpumask(item->vcpu->domain),
+                           item->cpu_soft_affinity);
 }
 
 /*
@@ -477,17 +477,18 @@ static inline int has_soft_affinity(const struct vcpu *v)
  * to avoid running a vcpu where it would like, but is not allowed to!
  */
 static inline void
-affinity_balance_cpumask(const struct vcpu *v, int step, cpumask_t *mask)
+affinity_balance_cpumask(const struct sched_item *item, int step,
+                         cpumask_t *mask)
 {
     if ( step == BALANCE_SOFT_AFFINITY )
     {
-        cpumask_and(mask, v->cpu_soft_affinity, v->cpu_hard_affinity);
+        cpumask_and(mask, item->cpu_soft_affinity, item->cpu_hard_affinity);
 
         if ( unlikely(cpumask_empty(mask)) )
-            cpumask_copy(mask, v->cpu_hard_affinity);
+            cpumask_copy(mask, item->cpu_hard_affinity);
     }
     else /* step == BALANCE_HARD_AFFINITY */
-        cpumask_copy(mask, v->cpu_hard_affinity);
+        cpumask_copy(mask, item->cpu_hard_affinity);
 }
 
 #endif /* __XEN_SCHED_IF_H__ */

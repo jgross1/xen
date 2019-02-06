@@ -175,9 +175,6 @@ struct vcpu
     } runstate_guest; /* guest address */
 #endif
 
-    /* last time when vCPU is scheduled out */
-    uint64_t last_run_time;
-
     /* Has the FPU been initialised? */
     bool             fpu_initialised;
     /* Has the FPU been used since it was last saved? */
@@ -203,8 +200,6 @@ struct vcpu
     bool             defer_shutdown;
     /* VCPU is paused following shutdown request (d->is_shutting_down)? */
     bool             paused_for_shutdown;
-    /* VCPU need affinity restored */
-    bool             affinity_broken;
 
     /* A hypercall has been preempted. */
     bool             hcall_preempted;
@@ -212,9 +207,6 @@ struct vcpu
     /* A hypercall is using the compat ABI? */
     bool             hcall_compat;
 #endif
-
-    /* Does soft affinity actually play a role (given hard affinity)? */
-    bool             soft_aff_effective;
 
     /* The CPU, if any, which is holding onto this VCPU's state. */
 #define VCPU_CPU_CLEAN (~0u)
@@ -247,16 +239,6 @@ struct vcpu
     evtchn_port_t    virq_to_evtchn[NR_VIRQS];
     spinlock_t       virq_lock;
 
-    /* Bitmask of CPUs on which this VCPU may run. */
-    cpumask_var_t    cpu_hard_affinity;
-    /* Used to change affinity temporarily. */
-    cpumask_var_t    cpu_hard_affinity_tmp;
-    /* Used to restore affinity across S3. */
-    cpumask_var_t    cpu_hard_affinity_saved;
-
-    /* Bitmask of CPUs on which this VCPU prefers to run. */
-    cpumask_var_t    cpu_soft_affinity;
-
     /* Tasklet for continue_hypercall_on_cpu(). */
     struct tasklet   continue_hypercall_tasklet;
 
@@ -283,6 +265,22 @@ struct sched_item {
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;
     struct sched_resource *res;
+
+    /* Last time when item has been scheduled out. */
+    uint64_t               last_run_time;
+
+    /* Item needs affinity restored. */
+    bool                   affinity_broken;
+    /* Does soft affinity actually play a role (given hard affinity)? */
+    bool                   soft_aff_effective;
+    /* Bitmask of CPUs on which this VCPU may run. */
+    cpumask_var_t          cpu_hard_affinity;
+    /* Used to change affinity temporarily. */
+    cpumask_var_t          cpu_hard_affinity_tmp;
+    /* Used to restore affinity across S3. */
+    cpumask_var_t          cpu_hard_affinity_saved;
+    /* Bitmask of CPUs on which this VCPU prefers to run. */
+    cpumask_var_t          cpu_soft_affinity;
 };
 
 #define for_each_sched_item(d, e)                                         \
@@ -982,7 +980,7 @@ static inline bool is_hvm_vcpu(const struct vcpu *v)
 static inline bool is_hwdom_pinned_vcpu(const struct vcpu *v)
 {
     return (is_hardware_domain(v->domain) &&
-            cpumask_weight(v->cpu_hard_affinity) == 1);
+            cpumask_weight(v->sched_item->cpu_hard_affinity) == 1);
 }
 
 #ifdef CONFIG_HAS_PASSTHROUGH

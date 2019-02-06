@@ -312,8 +312,8 @@ static void dump_domains(unsigned char key)
                 printk("dirty_cpu=%u", v->dirty_cpu);
             printk("\n");
             printk("    cpu_hard_affinity={%*pbl} cpu_soft_affinity={%*pbl}\n",
-                   nr_cpu_ids, cpumask_bits(v->cpu_hard_affinity),
-                   nr_cpu_ids, cpumask_bits(v->cpu_soft_affinity));
+                   nr_cpu_ids, cpumask_bits(v->sched_item->cpu_hard_affinity),
+                   nr_cpu_ids, cpumask_bits(v->sched_item->cpu_soft_affinity));
             printk("    pause_count=%d pause_flags=%lx\n",
                    atomic_read(&v->pause_count), v->pause_flags);
             arch_dump_vcpu_info(v);

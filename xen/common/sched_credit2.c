@@ -699,10 +699,10 @@ static int get_fallback_cpu(struct csched2_item *svc)
     {
         int cpu = v->processor;
 
-        if ( bs == BALANCE_SOFT_AFFINITY && !has_soft_affinity(v) )
+        if ( bs == BALANCE_SOFT_AFFINITY && !has_soft_affinity(v->sched_item) )
             continue;
 
-        affinity_balance_cpumask(v, bs, cpumask_scratch_cpu(cpu));
+        affinity_balance_cpumask(v->sched_item, bs, cpumask_scratch_cpu(cpu));
         cpumask_and(cpumask_scratch_cpu(cpu), cpumask_scratch_cpu(cpu),
                     cpupool_domain_cpumask(v->domain));
 
@@ -1390,10 +1390,10 @@ static s_time_t tickle_score(const struct scheduler *ops, s_time_t now,
      */
     if ( score > 0 )
     {
-        if ( cpumask_test_cpu(cpu, new->vcpu->cpu_soft_affinity) )
+        if ( cpumask_test_cpu(cpu, new->vcpu->sched_item->cpu_soft_affinity) )
             score += CSCHED2_CREDIT_INIT;
 
-        if ( !cpumask_test_cpu(cpu, cur->vcpu->cpu_soft_affinity) )
+        if ( !cpumask_test_cpu(cpu, cur->vcpu->sched_item->cpu_soft_affinity) )
             score += CSCHED2_CREDIT_INIT;
     }
 
@@ -1436,6 +1436,7 @@ runq_tickle(const struct scheduler *ops, struct csched2_item *new, s_time_t now)
 {
     int i, ipid = -1;
     s_time_t max = 0;
+    struct sched_item *item = new->vcpu->sched_item;
     unsigned int bs, cpu = new->vcpu->processor;
     struct csched2_runqueue_data *rqd = c2rqd(ops, cpu);
     cpumask_t *online = cpupool_domain_cpumask(new->vcpu->domain);
@@ -1473,7 +1474,7 @@ runq_tickle(const struct scheduler *ops, struct csched2_item *new, s_time_t now)
                   cpumask_test_cpu(cpu, &rqd->idle) &&
                   !cpumask_test_cpu(cpu, &rqd->tickled)) )
     {
-        ASSERT(cpumask_cycle(cpu, new->vcpu->cpu_hard_affinity) == cpu);
+        ASSERT(cpumask_cycle(cpu, item->cpu_hard_affinity) == cpu);
         SCHED_STAT_CRANK(tickled_idle_cpu_excl);
         ipid = cpu;
         goto tickle;
@@ -1482,10 +1483,10 @@ runq_tickle(const struct scheduler *ops, struct csched2_item *new, s_time_t now)
     for_each_affinity_balance_step( bs )
     {
         /* Just skip first step, if we don't have a soft affinity */
-        if ( bs == BALANCE_SOFT_AFFINITY && !has_soft_affinity(new->vcpu) )
+        if ( bs == BALANCE_SOFT_AFFINITY && !has_soft_affinity(item) )
             continue;
 
-        affinity_balance_cpumask(new->vcpu, bs, cpumask_scratch_cpu(cpu));
+        affinity_balance_cpumask(item, bs, cpumask_scratch_cpu(cpu));
 
         /*
          * First of all, consider idle cpus, checking if we can just
@@ -1557,7 +1558,7 @@ runq_tickle(const struct scheduler *ops, struct csched2_item *new, s_time_t now)
             ipid = cpu;
 
             /* If this is in new's soft affinity, just take it */
-            if ( cpumask_test_cpu(cpu, new->vcpu->cpu_soft_affinity) )
+            if ( cpumask_test_cpu(cpu, item->cpu_soft_affinity) )
             {
                 SCHED_STAT_CRANK(tickled_busy_cpu);
                 goto tickle;
@@ -2243,7 +2244,7 @@ csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
         goto out;
     }
 
-    cpumask_and(cpumask_scratch_cpu(cpu), vc->cpu_hard_affinity,
+    cpumask_and(cpumask_scratch_cpu(cpu), item->cpu_hard_affinity,
                 cpupool_domain_cpumask(vc->domain));
 
     /*
@@ -2288,7 +2289,7 @@ csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
      *
      * Find both runqueues in one pass.
      */
-    has_soft = has_soft_affinity(vc);
+    has_soft = has_soft_affinity(item);
     for_each_cpu(i, &prv->active_queues)
     {
         struct csched2_runqueue_data *rqd;
@@ -2335,7 +2336,7 @@ csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
             cpumask_t mask;
 
             cpumask_and(&mask, cpumask_scratch_cpu(cpu), &rqd->active);
-            if ( cpumask_intersects(&mask, svc->vcpu->cpu_soft_affinity) )
+            if ( cpumask_intersects(&mask, item->cpu_soft_affinity) )
             {
                 min_s_avgload = rqd_avgload;
                 min_s_rqi = i;
@@ -2357,9 +2358,9 @@ csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
          * Note that, to obtain the soft-affinity mask, we "just" put what we
          * have in cpumask_scratch in && with vc->cpu_soft_affinity. This is
          * ok because:
-         * - we know that vc->cpu_hard_affinity and vc->cpu_soft_affinity have
+         * - we know that item->cpu_hard_affinity and ->cpu_soft_affinity have
          *   a non-empty intersection (because has_soft is true);
-         * - we have vc->cpu_hard_affinity & cpupool_domain_cpumask() already
+         * - we have item->cpu_hard_affinity & cpupool_domain_cpumask() already
          *   in cpumask_scratch, we do save a lot doing like this.
          *
          * It's kind of like open coding affinity_balance_cpumask() but, in
@@ -2367,7 +2368,7 @@ csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
          * cpumask operations.
          */
         cpumask_and(cpumask_scratch_cpu(cpu), cpumask_scratch_cpu(cpu),
-                    vc->cpu_soft_affinity);
+                    item->cpu_soft_affinity);
         cpumask_and(cpumask_scratch_cpu(cpu), cpumask_scratch_cpu(cpu),
                     &prv->rqd[min_s_rqi].active);
     }
@@ -2475,6 +2476,7 @@ static void migrate(const struct scheduler *ops,
                     s_time_t now)
 {
     int cpu = svc->vcpu->processor;
+    struct sched_item *item = svc->vcpu->sched_item;
 
     if ( unlikely(tb_init_done) )
     {
@@ -2512,7 +2514,7 @@ static void migrate(const struct scheduler *ops,
         }
         _runq_deassign(svc);
 
-        cpumask_and(cpumask_scratch_cpu(cpu), svc->vcpu->cpu_hard_affinity,
+        cpumask_and(cpumask_scratch_cpu(cpu), item->cpu_hard_affinity,
                     cpupool_domain_cpumask(svc->vcpu->domain));
         cpumask_and(cpumask_scratch_cpu(cpu), cpumask_scratch_cpu(cpu),
                     &trqd->active);
@@ -2546,7 +2548,7 @@ static bool vcpu_is_migrateable(struct csched2_item *svc,
     struct vcpu *v = svc->vcpu;
     int cpu = svc->vcpu->processor;
 
-    cpumask_and(cpumask_scratch_cpu(cpu), v->cpu_hard_affinity,
+    cpumask_and(cpumask_scratch_cpu(cpu), v->sched_item->cpu_hard_affinity,
                 cpupool_domain_cpumask(v->domain));
 
     return !(svc->flags & CSFLAG_runq_migrate_request) &&
@@ -2780,7 +2782,7 @@ csched2_item_migrate(
 
     /* If here, new_cpu must be a valid Credit2 pCPU, and in our affinity. */
     ASSERT(cpumask_test_cpu(new_cpu, &csched2_priv(ops)->initialized));
-    ASSERT(cpumask_test_cpu(new_cpu, vc->cpu_hard_affinity));
+    ASSERT(cpumask_test_cpu(new_cpu, item->cpu_hard_affinity));
 
     trqd = c2rqd(ops, new_cpu);
 
@@ -3320,9 +3322,9 @@ runq_candidate(struct csched2_runqueue_data *rqd,
     }
 
     /* If scurr has a soft-affinity, let's check whether cpu is part of it */
-    if ( has_soft_affinity(scurr->vcpu) )
+    if ( has_soft_affinity(scurr->vcpu->sched_item) )
     {
-        affinity_balance_cpumask(scurr->vcpu, BALANCE_SOFT_AFFINITY,
+        affinity_balance_cpumask(scurr->vcpu->sched_item, BALANCE_SOFT_AFFINITY,
                                  cpumask_scratch);
         if ( unlikely(!cpumask_test_cpu(cpu, cpumask_scratch)) )
         {
@@ -3377,7 +3379,7 @@ runq_candidate(struct csched2_runqueue_data *rqd,
         }
 
         /* Only consider vcpus that are allowed to run on this processor. */
-        if ( !cpumask_test_cpu(cpu, svc->vcpu->cpu_hard_affinity) )
+        if ( !cpumask_test_cpu(cpu, svc->vcpu->sched_item->cpu_hard_affinity) )
         {
             (*skipped)++;
             continue;
