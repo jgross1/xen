@@ -475,7 +475,7 @@ a653sched_item_sleep(const struct scheduler *ops, struct sched_item *item)
      * If the VCPU being put to sleep is the same one that is currently
      * running, raise a softirq to invoke the scheduler to switch domains.
      */
-    if ( per_cpu(schedule_data, vc->processor).curr == item )
+    if ( per_cpu(sched_res, vc->processor)->curr == item )
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
 }
 
@@ -642,7 +642,7 @@ static void
 a653_switch_sched(struct scheduler *new_ops, unsigned int cpu,
                   void *pdata, void *vdata)
 {
-    struct schedule_data *sd = &per_cpu(schedule_data, cpu);
+    struct sched_resource *sd = per_cpu(sched_res, cpu);
     arinc653_vcpu_t *svc = vdata;
 
     ASSERT(!pdata && svc && is_idle_vcpu(svc->vc));
@@ -650,7 +650,7 @@ a653_switch_sched(struct scheduler *new_ops, unsigned int cpu,
     idle_vcpu[cpu]->sched_item->priv = vdata;
 
     per_cpu(scheduler, cpu) = new_ops;
-    per_cpu(schedule_data, cpu).sched_priv = NULL; /* no pdata */
+    per_cpu(sched_res, cpu)->sched_priv = NULL; /* no pdata */
 
     /*
      * (Re?)route the lock to its default location. We actually do not use
