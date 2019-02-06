@@ -51,7 +51,15 @@ DECLARE_PER_CPU(struct cpupool *, cpupool);
 struct sched_item {
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
+    struct sched_item     *next_in_list;
 };
+
+#define for_each_sched_item(d, e)                                         \
+    for ( (e) = (d)->sched_item_list; (e) != NULL; (e) = (e)->next_in_list )
+
+#define for_each_sched_item_vcpu(i, v)                                    \
+    for ( (v) = (i)->vcpu; (v) != NULL && (v)->sched_item == (i);         \
+          (v) = (v)->next_in_list )
 
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.

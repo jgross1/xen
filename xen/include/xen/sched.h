@@ -334,6 +334,7 @@ struct domain
 
     /* Scheduling. */
     void            *sched_priv;    /* scheduler-specific data */
+    struct sched_item *sched_item_list;
     struct cpupool  *cpupool;
 
     struct domain   *next_in_list;
