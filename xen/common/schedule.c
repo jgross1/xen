@@ -54,6 +54,10 @@ boolean_param("sched_smt_power_savings", sched_smt_power_savings);
  * */
 int sched_ratelimit_us = SCHED_DEFAULT_RATELIMIT_US;
 integer_param("sched_ratelimit_us", sched_ratelimit_us);
+
+/* Number of vcpus per struct sched_item. */
+static unsigned int sched_granularity = 1;
+
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
 static void vcpu_periodic_timer_fn(void *data);
@@ -1579,87 +1583,21 @@ static void vcpu_periodic_timer_work(struct vcpu *v)
     set_timer(&v->periodic_timer, periodic_next_event);
 }
 
-/*
- * The main function
- * - deschedule the current domain (scheduler independent).
- * - pick a new domain (scheduler dependent).
- */
-static void schedule(void)
+static void sched_switch_items(struct sched_resource *sd,
+                               struct sched_item *next, struct sched_item *prev,
+                               s_time_t now)
 {
-    struct sched_item    *prev = current->sched_item, *next = NULL;
-    s_time_t              now;
-    struct scheduler     *sched;
-    unsigned long        *tasklet_work = &this_cpu(tasklet_work_to_do);
-    bool                  tasklet_work_scheduled = false;
-    struct sched_resource *sd;
-    spinlock_t           *lock;
-    int cpu = smp_processor_id();
-
-    ASSERT_NOT_IN_ATOMIC();
-
-    SCHED_STAT_CRANK(sched_run);
-
-    sd = this_cpu(sched_res);
-
-    /* Update tasklet scheduling status. */
-    switch ( *tasklet_work )
-    {
-    case TASKLET_enqueued:
-        set_bit(_TASKLET_scheduled, tasklet_work);
-        /* fallthrough */
-    case TASKLET_enqueued|TASKLET_scheduled:
-        tasklet_work_scheduled = true;
-        break;
-    case TASKLET_scheduled:
-        clear_bit(_TASKLET_scheduled, tasklet_work);
-    case 0:
-        /*tasklet_work_scheduled = false;*/
-        break;
-    default:
-        BUG();
-    }
-
-    lock = pcpu_schedule_lock_irq(cpu);
-
-    now = NOW();
-
-    stop_timer(&sd->s_timer);
-
-    /* get policy-specific decision on scheduling... */
-    sched = this_cpu(scheduler);
-    sched->do_schedule(sched, prev, now, tasklet_work_scheduled);
-
-    next = prev->next_task;
-
     sd->curr = next;
 
-    if ( prev->next_time >= 0 ) /* -ve means no limit */
-        set_timer(&sd->s_timer, now + prev->next_time);
-
-    if ( unlikely(prev == next) )
-    {
-        pcpu_schedule_unlock_irq(lock, cpu);
-        TRACE_4D(TRC_SCHED_SWITCH_INFCONT,
-                 next->domain->domain_id, next->item_id,
-                 now - prev->state_entry_time,
-                 prev->next_time);
-        trace_continue_running(next->vcpu);
-        return continue_running(prev->vcpu);
-    }
-
-    TRACE_3D(TRC_SCHED_SWITCH_INFPREV,
-             prev->domain->domain_id, prev->item_id,
+    TRACE_3D(TRC_SCHED_SWITCH_INFPREV, prev->domain->domain_id, prev->item_id,
              now - prev->state_entry_time);
-    TRACE_4D(TRC_SCHED_SWITCH_INFNEXT,
-             next->domain->domain_id, next->item_id,
+    TRACE_4D(TRC_SCHED_SWITCH_INFNEXT, next->domain->domain_id, next->item_id,
              (next->vcpu->runstate.state == RUNSTATE_runnable) ?
-             (now - next->state_entry_time) : 0,
-             prev->next_time);
+             (now - next->state_entry_time) : 0, prev->next_time);
 
     ASSERT(prev->vcpu->runstate.state == RUNSTATE_running);
 
-    TRACE_4D(TRC_SCHED_SWITCH,
-             prev->domain->domain_id, prev->item_id,
+    TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->item_id,
              next->domain->domain_id, next->item_id);
 
     sched_item_runstate_change(prev, false, now);
@@ -1675,7 +1613,125 @@ static void schedule(void)
 
     ASSERT(!next->is_running);
     next->is_running = 1;
-    next->state_entry_time = now;
+}
+
+static void sched_wait_rendezvous_in(struct sched_item *item, spinlock_t *lock,
+                                     int cpu, s_time_t now)
+{
+    if ( !--item->rendezvous_in_cnt )
+    {
+        atomic_set(&item->next_task->rendezvous_out_cnt, sched_granularity + 1);
+        sched_switch_items(this_cpu(sched_res), item->next_task, item, now);
+        return;
+    }
+
+    while ( item->rendezvous_in_cnt )
+    {
+        pcpu_schedule_unlock_irq(lock, cpu);
+        cpu_relax();
+        pcpu_schedule_lock_irq(cpu);
+    }
+}
+
+static bool sched_tasklet_check(void)
+{
+    unsigned long *tasklet_work = &this_cpu(tasklet_work_to_do);
+    bool tasklet_work_scheduled = false;
+    const cpumask_t *mask = this_cpu(sched_res)->cpus;
+    int cpu;
+
+    for_each_cpu ( cpu, mask )
+    {
+        switch ( *tasklet_work )
+        {
+        case TASKLET_enqueued:
+            set_bit(_TASKLET_scheduled, tasklet_work);
+            /* fallthrough */
+        case TASKLET_enqueued|TASKLET_scheduled:
+            tasklet_work_scheduled = true;
+            break;
+        case TASKLET_scheduled:
+            clear_bit(_TASKLET_scheduled, tasklet_work);
+        case 0:
+            /*tasklet_work_scheduled = false;*/
+            break;
+        default:
+            BUG();
+        }
+    }
+
+    return tasklet_work_scheduled;
+}
+
+/*
+ * The main function
+ * - deschedule the current domain (scheduler independent).
+ * - pick a new domain (scheduler dependent).
+ */
+static void schedule(void)
+{
+    struct sched_item    *prev = current->sched_item, *next = NULL;
+    s_time_t              now;
+    struct scheduler     *sched;
+    struct sched_resource *sd;
+    spinlock_t           *lock;
+    int cpu = smp_processor_id();
+
+    ASSERT_NOT_IN_ATOMIC();
+
+    SCHED_STAT_CRANK(sched_run);
+
+    sd = this_cpu(sched_res);
+
+    lock = pcpu_schedule_lock_irq(cpu);
+
+    now = NOW();
+
+    if ( prev->rendezvous_in_cnt )
+    {
+        next = prev->next_task;
+        sched_wait_rendezvous_in(prev, lock, cpu, now);
+    }
+    else
+    {
+        stop_timer(&sd->s_timer);
+
+        /* get policy-specific decision on scheduling... */
+        sched = this_cpu(scheduler);
+        sched->do_schedule(sched, prev, now, sched_tasklet_check());
+
+        next = prev->next_task;
+
+        if ( prev->next_time >= 0 ) /* -ve means no limit */
+            set_timer(&sd->s_timer, now + prev->next_time);
+
+        if ( unlikely(prev == next) )
+        {
+            pcpu_schedule_unlock_irq(lock, cpu);
+            TRACE_4D(TRC_SCHED_SWITCH_INFCONT,
+                     next->domain->domain_id, next->item_id,
+                     now - prev->vcpu->runstate.state_entry_time,
+                     prev->next_time);
+            trace_continue_running(next->vcpu);
+            return continue_running(prev->vcpu);
+        }
+
+        if ( sched_granularity > 1 )
+        {
+            cpumask_t mask;
+
+            prev->rendezvous_in_cnt = sched_granularity;
+            cpumask_andnot(&mask, sd->cpus, cpumask_of(cpu));
+            cpumask_raise_softirq(&mask, SCHEDULE_SOFTIRQ);
+            sched_wait_rendezvous_in(prev, lock, cpu, now);
+        }
+        else
+        {
+            prev->rendezvous_in_cnt = 0;
+            atomic_set(&next->rendezvous_out_cnt, 0);
+            sched_switch_items(sd, next, prev, now);
+        }
+    }
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
@@ -1746,6 +1802,7 @@ static int cpu_schedule_up(unsigned int cpu)
     if ( sd == NULL )
         return -ENOMEM;
     sd->processor = cpu;
+    sd->cpus = cpumask_of(cpu);
     per_cpu(sched_res, cpu) = sd;
 
     per_cpu(scheduler, cpu) = &ops;

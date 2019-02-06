@@ -1760,12 +1760,12 @@ static void __context_switch(void)
     per_cpu(curr_vcpu, cpu) = n;
 }
 
-
 void context_switch(struct vcpu *prev, struct vcpu *next)
 {
     unsigned int cpu = smp_processor_id();
     const struct domain *prevd = prev->domain, *nextd = next->domain;
     unsigned int dirty_cpu = next->dirty_cpu;
+    struct sched_item *item = next->sched_item;
 
     ASSERT(local_irq_is_enabled());
 
@@ -1838,7 +1838,22 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
         }
     }
 
-    context_saved(prev);
+    if ( atomic_read(&item->rendezvous_out_cnt) )
+    {
+        int cnt = atomic_dec_return(&item->rendezvous_out_cnt);
+
+        /* Call context_saved() before releasing other waiters. */
+        if ( cnt == 1 )
+        {
+            context_saved(prev);
+            atomic_set(&item->rendezvous_out_cnt, 0);
+        }
+        else
+            while ( atomic_read(&item->rendezvous_out_cnt) )
+                cpu_relax();
+    }
+    else
+        context_saved(prev);
 
     if ( prev != next )
     {
