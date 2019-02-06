@@ -313,7 +313,7 @@ static long cpupool_unassign_cpu_helper(void *info)
      * cpu_disable_scheduler(), and at the bottom of this function.
      */
     rcu_read_lock(&domlist_read_lock);
-    ret = cpu_disable_scheduler(cpu);
+    ret = (system_state == SYS_STATE_suspend) ? 0 : cpu_disable_scheduler(cpu);
     cpumask_set_cpu(cpu, &cpupool_free_cpus);
 
     /*
