@@ -202,6 +202,12 @@ int pv_vcpu_initialise(struct vcpu *v)
             goto done;
     }
 
+    if ( d->arch.pv.l4tab_idle )
+    {
+        v->arch.guest_table = pagetable_from_paddr(__pa(d->arch.pv.l4tab_idle));
+        update_cr3(v);
+    }
+
  done:
     if ( rc )
         pv_vcpu_destroy(v);
@@ -218,6 +224,7 @@ void pv_domain_destroy(struct domain *d)
     XFREE(d->arch.pv.cpuidmasks);
 
     FREE_XENHEAP_PAGE(d->arch.pv.gdt_ldt_l1tab);
+    FREE_XENHEAP_PAGE(d->arch.pv.l4tab_idle);
 }
 
 
@@ -249,6 +256,18 @@ int pv_domain_initialise(struct domain *d)
         goto fail;
 
     d->arch.ctxt_switch = &pv_csw;
+
+    if ( sched_granularity > 1 )
+    {
+        l4_pgentry_t *l4;
+
+        l4 = alloc_xenheap_pages(0, MEMF_node(domain_to_node(d)));
+        if ( !l4 )
+            goto fail;
+        clear_page(l4);
+        init_xen_l4_slots(l4, _mfn(virt_to_mfn(l4)), d, INVALID_MFN, true);
+        d->arch.pv.l4tab_idle = l4;
+    }
 
     /* 64-bit PV guest by default. */
     d->arch.is_32bit_pv = d->arch.has_32bit_shinfo = 0;

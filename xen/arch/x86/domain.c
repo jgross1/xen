@@ -123,6 +123,18 @@ static void play_dead(void)
     (*dead_idle)();
 }
 
+void guest_idle_loop(void)
+{
+    unsigned int cpu = smp_processor_id();
+
+    for ( ; ; )
+    {
+        if ( !softirq_pending(cpu) )
+            pm_idle();
+        do_softirq();
+    }
+}
+
 static void idle_loop(void)
 {
     unsigned int cpu = smp_processor_id();
@@ -1674,6 +1686,7 @@ static void __context_switch(void)
     struct domain        *pd = p->domain, *nd = n->domain;
     seg_desc_t           *gdt;
     struct desc_ptr       gdt_desc;
+    bool                  need_full_gdt_n, need_full_gdt_p;
 
     ASSERT(p != n);
     ASSERT(!vcpu_cpu_dirty(n));
@@ -1715,7 +1728,11 @@ static void __context_switch(void)
 
     gdt = !is_pv_32bit_domain(nd) ? per_cpu(gdt_table, cpu) :
                                     per_cpu(compat_gdt_table, cpu);
-    if ( need_full_gdt(nd) )
+
+    need_full_gdt_n = need_full_gdt(nd) && vcpu_runnable(n);
+    need_full_gdt_p = need_full_gdt(pd) && vcpu_runnable(p);
+
+    if ( need_full_gdt_n )
     {
         unsigned long mfn = virt_to_mfn(gdt);
         l1_pgentry_t *pl1e = pv_gdt_ptes(n);
@@ -1726,8 +1743,8 @@ static void __context_switch(void)
                       l1e_from_pfn(mfn + i, __PAGE_HYPERVISOR_RW));
     }
 
-    if ( need_full_gdt(pd) &&
-         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt(nd)) )
+    if ( need_full_gdt_p &&
+         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt_n) )
     {
         gdt_desc.limit = LAST_RESERVED_GDT_BYTE;
         gdt_desc.base  = (unsigned long)(gdt - FIRST_RESERVED_GDT_ENTRY);
@@ -1744,8 +1761,8 @@ static void __context_switch(void)
         svm_load_segs(0, 0, 0, 0, 0, 0, 0);
 #endif
 
-    if ( need_full_gdt(nd) &&
-         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt(pd)) )
+    if ( need_full_gdt_n &&
+         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt_p) )
     {
         gdt_desc.limit = LAST_RESERVED_GDT_BYTE;
         gdt_desc.base = GDT_VIRT_START(n);
@@ -1867,6 +1884,9 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
     /* Ensure that the vcpu has an up-to-date time base. */
     update_vcpu_system_time(next);
 
+    if ( !vcpu_runnable(next) )
+        sched_vcpu_idle(next);
+
     /*
      * Schedule tail *should* be a terminal function pointer, but leave a
      * bug frame around just in case it returns, to save going back into the
@@ -1878,6 +1898,9 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
 
 void continue_running(struct vcpu *same)
 {
+    if ( !vcpu_runnable(same) )
+        sched_vcpu_idle(same);
+
     /* See the comment above. */
     same->domain->arch.ctxt_switch->tail(same);
     BUG();

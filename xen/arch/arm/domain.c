@@ -59,6 +59,18 @@ static void do_idle(void)
     sched_tick_resume();
 }
 
+void guest_idle_loop(void)
+{
+    unsigned int cpu = smp_processor_id();
+
+    for ( ; ; )
+    {
+        if ( !softirq_pending(cpu) )
+            do_idle();
+        do_softirq();
+    }
+}
+
 void idle_loop(void)
 {
     unsigned int cpu = smp_processor_id();
@@ -329,6 +341,8 @@ static void continue_new_vcpu(struct vcpu *prev)
 
     if ( is_idle_vcpu(current) )
         reset_stack_and_jump(idle_loop);
+    else if ( !vcpu_runnable(current) )
+        sched_vcpu_idle(current);
     else if ( is_32bit_domain(current->domain) )
         /* check_wakeup_from_wait(); */
         reset_stack_and_jump(return_to_new_vcpu32);

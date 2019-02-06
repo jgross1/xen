@@ -256,6 +256,9 @@ struct pv_domain
 
     atomic_t nr_l4_pages;
 
+    /* L4 tab for offline vcpus with scheduling granularity > 1. */
+    l4_pgentry_t *l4tab_idle;
+
     /* XPTI active? */
     bool xpti;
     /* Use PCID feature? */
