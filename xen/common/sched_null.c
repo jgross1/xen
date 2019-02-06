@@ -746,10 +746,10 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     if ( tasklet_work_scheduled )
     {
         trace_var(TRC_SNULL_TASKLET, 1, 0, NULL);
-        ret.task = idle_vcpu[cpu];
+        ret.task = idle_vcpu[cpu]->sched_item;
     }
     else
-        ret.task = per_cpu(npc, cpu).vcpu;
+        ret.task = per_cpu(npc, cpu).vcpu->sched_item;
     ret.migrated = 0;
     ret.time = -1;
 
@@ -784,7 +784,7 @@ static struct task_slice null_schedule(const struct scheduler *ops,
                 {
                     vcpu_assign(prv, wvc->vcpu, cpu);
                     list_del_init(&wvc->waitq_elem);
-                    ret.task = wvc->vcpu;
+                    ret.task = wvc->vcpu->sched_item;
                     goto unlock;
                 }
             }
@@ -793,10 +793,10 @@ static struct task_slice null_schedule(const struct scheduler *ops,
         spin_unlock(&prv->waitq_lock);
     }
 
-    if ( unlikely(ret.task == NULL || !vcpu_runnable(ret.task)) )
-        ret.task = idle_vcpu[cpu];
+    if ( unlikely(ret.task == NULL || !item_runnable(ret.task)) )
+        ret.task = idle_vcpu[cpu]->sched_item;
 
-    NULL_VCPU_CHECK(ret.task);
+    NULL_VCPU_CHECK(ret.task->vcpu);
     return ret;
 }
 
