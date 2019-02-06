@@ -376,13 +376,16 @@ a653sched_deinit(struct scheduler *ops)
  * This function allocates scheduler-specific data for a VCPU
  *
  * @param ops       Pointer to this instance of the scheduler structure
+ * @param item      Pointer to struct sched_item
  *
  * @return          Pointer to the allocated data
  */
 static void *
-a653sched_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
+a653sched_alloc_vdata(const struct scheduler *ops, struct sched_item *item,
+                      void *dd)
 {
     a653sched_priv_t *sched_priv = SCHED_PRIV(ops);
+    struct vcpu *vc = item->vcpu;
     arinc653_vcpu_t *svc;
     unsigned int entry;
     unsigned long flags;
@@ -458,11 +461,13 @@ a653sched_free_vdata(const struct scheduler *ops, void *priv)
  * Xen scheduler callback function to sleep a VCPU
  *
  * @param ops       Pointer to this instance of the scheduler structure
- * @param vc        Pointer to the VCPU structure for the current domain
+ * @param item      Pointer to struct sched_item
  */
 static void
-a653sched_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
+a653sched_item_sleep(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
+
     if ( AVCPU(vc) != NULL )
         AVCPU(vc)->awake = 0;
 
@@ -478,11 +483,13 @@ a653sched_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
  * Xen scheduler callback function to wake up a VCPU
  *
  * @param ops       Pointer to this instance of the scheduler structure
- * @param vc        Pointer to the VCPU structure for the current domain
+ * @param item      Pointer to struct sched_item
  */
 static void
-a653sched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
+a653sched_item_wake(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
+
     if ( AVCPU(vc) != NULL )
         AVCPU(vc)->awake = 1;
 
@@ -597,13 +604,14 @@ a653sched_do_schedule(
  * Xen scheduler callback function to select a CPU for the VCPU to run on
  *
  * @param ops       Pointer to this instance of the scheduler structure
- * @param v         Pointer to the VCPU structure for the current domain
+ * @param item      Pointer to struct sched_item
  *
  * @return          Number of selected physical CPU
  */
 static int
-a653sched_pick_cpu(const struct scheduler *ops, struct vcpu *vc)
+a653sched_pick_cpu(const struct scheduler *ops, struct sched_item *item)
 {
+    struct vcpu *vc = item->vcpu;
     cpumask_t *online;
     unsigned int cpu;
 
@@ -712,11 +720,11 @@ static const struct scheduler sched_arinc653_def = {
     .free_vdata     = a653sched_free_vdata,
     .alloc_vdata    = a653sched_alloc_vdata,
 
-    .insert_vcpu    = NULL,
-    .remove_vcpu    = NULL,
+    .insert_item    = NULL,
+    .remove_item    = NULL,
 
-    .sleep          = a653sched_vcpu_sleep,
-    .wake           = a653sched_vcpu_wake,
+    .sleep          = a653sched_item_sleep,
+    .wake           = a653sched_item_wake,
     .yield          = NULL,
     .context_saved  = NULL,
 
