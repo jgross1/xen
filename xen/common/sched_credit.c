@@ -1080,7 +1080,7 @@ csched_item_remove(const struct scheduler *ops, struct sched_item *item)
     if ( test_and_clear_bit(CSCHED_FLAG_ITEM_PARKED, &svc->flags) )
     {
         SCHED_STAT_CRANK(item_unpark);
-        vcpu_unpause(svc->item->vcpu);
+        sched_item_unpause(svc->item);
     }
 
     spin_lock_irq(&prv->lock);
@@ -1530,7 +1530,7 @@ csched_acct(void* dummy)
                      !test_and_set_bit(CSCHED_FLAG_ITEM_PARKED, &svc->flags) )
                 {
                     SCHED_STAT_CRANK(item_park);
-                    vcpu_pause_nosync(svc->item->vcpu);
+                    sched_item_pause_nosync(svc->item);
                 }
 
                 /* Lower bound on credits */
@@ -1554,7 +1554,7 @@ csched_acct(void* dummy)
                      * if it is woken up here.
                      */
                     SCHED_STAT_CRANK(item_unpark);
-                    vcpu_unpause(svc->item->vcpu);
+                    sched_item_unpause(svc->item);
                 }
 
                 /* Upper bound on credits means ITEM stops earning */
