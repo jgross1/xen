@@ -321,12 +321,11 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     struct domain *d = v->domain;
     struct sched_item *item;
 
-    v->processor = processor;
-
     if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
 
-    item->res = per_cpu(sched_res, processor);
+    sched_set_res(item, per_cpu(sched_res, processor));
+
     /* Initialise the per-vcpu timers. */
     init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
                v, v->processor);
@@ -440,8 +439,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
 
         sched_set_affinity(v, &cpumask_all, &cpumask_all);
 
-        v->processor = new_p;
-	v->sched_item->res = per_cpu(sched_res, new_p);
+        sched_set_res(v->sched_item, per_cpu(sched_res, new_p));
         /*
          * With v->processor modified we must not
          * - make any further changes assuming we hold the scheduler lock,
@@ -632,10 +630,7 @@ static void vcpu_move_locked(struct vcpu *v, unsigned int new_cpu)
     if ( vcpu_scheduler(v)->migrate )
         SCHED_OP(vcpu_scheduler(v), migrate, v->sched_item, new_cpu);
     else
-    {
-        v->processor = new_cpu;
-        v->sched_item->res = per_cpu(sched_res, new_cpu);
-    }
+        sched_set_res(v->sched_item, per_cpu(sched_res, new_cpu));
 }
 
 /*
@@ -785,8 +780,9 @@ void restore_vcpu_affinity(struct domain *d)
         spinlock_t *lock;
         unsigned int old_cpu = v->processor;
         struct sched_item *item = v->sched_item;
+        struct sched_resource *res;
 
-        ASSERT(!vcpu_runnable(v));
+        ASSERT(!item_runnable(item));
 
         /*
          * Re-assign the initial processor as after resume we have no
@@ -817,12 +813,12 @@ void restore_vcpu_affinity(struct domain *d)
             }
         }
 
-        v->processor = cpumask_any(cpumask_scratch_cpu(cpu));
-        item->res = per_cpu(sched_res, v->processor);
+        res = per_cpu(sched_res, cpumask_any(cpumask_scratch_cpu(cpu)));
+        sched_set_res(item, res);
 
         lock = item_schedule_lock_irq(item);
-        item->res = SCHED_OP(vcpu_scheduler(v), pick_resource, item);
-        v->processor = item->res->processor;
+        res = SCHED_OP(vcpu_scheduler(v), pick_resource, item);
+        sched_set_res(item, res);
         spin_unlock_irq(lock);
 
         if ( old_cpu != v->processor )
