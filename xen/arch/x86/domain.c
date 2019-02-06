@@ -1709,12 +1709,45 @@ static void __context_switch(void)
     per_cpu(curr_vcpu, cpu) = n;
 }
 
+/*
+ * Rendezvous on end of context switch.
+ * As no lock is protecting this rendezvous function we need to use atomic
+ * access functions on the counter.
+ * The counter will be 0 in case no rendezvous is needed. For the rendezvous
+ * case it is initialised to the number of cpus to rendezvous plus 1. Each
+ * member entering decrements the counter. The last one will decrement it to
+ * 1 and perform the final needed action in that case (call of context_saved()
+ * if prev was specified, and then set the counter to zero. The other members
+ * will wait until the counter becomes zero until they proceed.
+ */
+static void context_wait_rendezvous_out(struct sched_item *item,
+                                        struct vcpu *prev)
+{
+    if ( atomic_read(&item->rendezvous_out_cnt) )
+    {
+        int cnt = atomic_dec_return(&item->rendezvous_out_cnt);
+
+        /* Call context_saved() before releasing other waiters. */
+        if ( cnt == 1 )
+        {
+            if ( prev )
+                context_saved(prev);
+            atomic_set(&item->rendezvous_out_cnt, 0);
+        }
+        else
+            while ( atomic_read(&item->rendezvous_out_cnt) )
+                cpu_relax();
+    }
+    else if ( prev )
+        context_saved(prev);
+}
 
 void context_switch(struct vcpu *prev, struct vcpu *next)
 {
     unsigned int cpu = smp_processor_id();
     const struct domain *prevd = prev->domain, *nextd = next->domain;
     unsigned int dirty_cpu = next->dirty_cpu;
+    struct sched_item *item = next->sched_item;
 
     ASSERT(local_irq_is_enabled());
 
@@ -1787,7 +1820,7 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
         }
     }
 
-    context_saved(prev);
+    context_wait_rendezvous_out(item, prev);
 
     if ( prev != next )
     {
@@ -1812,6 +1845,8 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
 
 void continue_running(struct vcpu *same)
 {
+    context_wait_rendezvous_out(same->sched_item, NULL);
+
     /* See the comment above. */
     same->domain->arch.ctxt_switch->tail(same);
     BUG();
