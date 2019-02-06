@@ -867,8 +867,8 @@ _csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc, bool_t commit)
     return cpu;
 }
 
-static int
-csched_cpu_pick(const struct scheduler *ops, struct sched_item *item)
+static struct sched_resource *
+csched_res_pick(const struct scheduler *ops, struct sched_item *item)
 {
     struct vcpu *vc = item->vcpu;
     struct csched_vcpu *svc = CSCHED_VCPU(vc);
@@ -881,7 +881,7 @@ csched_cpu_pick(const struct scheduler *ops, struct sched_item *item)
      * get boosted, which we don't deserve as we are "only" migrating.
      */
     set_bit(CSCHED_FLAG_VCPU_MIGRATING, &svc->flags);
-    return _csched_cpu_pick(ops, vc, 1);
+    return per_cpu(sched_res, _csched_cpu_pick(ops, vc, 1));
 }
 
 static inline void
@@ -981,7 +981,7 @@ csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
         /*
          * If it's been active a while, check if we'd be better off
          * migrating it to run elsewhere (see multi-core and multi-thread
-         * support in csched_cpu_pick()).
+         * support in csched_res_pick()).
          */
         new_cpu = _csched_cpu_pick(ops, current, 0);
 
@@ -1036,11 +1036,11 @@ csched_item_insert(const struct scheduler *ops, struct sched_item *item)
 
     BUG_ON( is_idle_vcpu(vc) );
 
-    /* csched_cpu_pick() looks in vc->processor's runq, so we need the lock. */
+    /* csched_res_pick() looks in vc->processor's runq, so we need the lock. */
     lock = vcpu_schedule_lock_irq(vc);
 
-    vc->processor = csched_cpu_pick(ops, item);
-    item->res = per_cpu(sched_res, vc->processor);
+    item->res = csched_res_pick(ops, item);
+    vc->processor = item->res->processor;
 
     spin_unlock_irq(lock);
 
@@ -2290,7 +2290,7 @@ static const struct scheduler sched_credit_def = {
     .adjust_affinity= csched_aff_cntl,
     .adjust_global  = csched_sys_cntl,
 
-    .pick_cpu       = csched_cpu_pick,
+    .pick_resource  = csched_res_pick,
     .do_schedule    = csched_schedule,
 
     .dump_cpu_state = csched_dump_pcpu,

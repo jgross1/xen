@@ -601,15 +601,15 @@ a653sched_do_schedule(
 }
 
 /**
- * Xen scheduler callback function to select a CPU for the VCPU to run on
+ * Xen scheduler callback function to select a resource for the VCPU to run on
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param item      Pointer to struct sched_item
  *
- * @return          Number of selected physical CPU
+ * @return          Scheduler resource to run on
  */
-static int
-a653sched_pick_cpu(const struct scheduler *ops, struct sched_item *item)
+static struct sched_resource *
+a653sched_pick_resource(const struct scheduler *ops, struct sched_item *item)
 {
     struct vcpu *vc = item->vcpu;
     cpumask_t *online;
@@ -627,7 +627,7 @@ a653sched_pick_cpu(const struct scheduler *ops, struct sched_item *item)
          || (cpu >= nr_cpu_ids) )
         cpu = vc->processor;
 
-    return cpu;
+    return per_cpu(sched_res, cpu);
 }
 
 /**
@@ -730,7 +730,7 @@ static const struct scheduler sched_arinc653_def = {
 
     .do_schedule    = a653sched_do_schedule,
 
-    .pick_cpu       = a653sched_pick_cpu,
+    .pick_resource  = a653sched_pick_resource,
 
     .switch_sched   = a653_switch_sched,
 
