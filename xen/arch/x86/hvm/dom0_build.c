@@ -614,7 +614,7 @@ static int __init pvh_setup_cpus(struct domain *d, paddr_t entry,
                                  paddr_t start_info)
 {
     struct vcpu *v = d->vcpu[0];
-    unsigned int cpu = v->processor, i;
+    unsigned int i;
     int rc;
     /*
      * This sets the vCPU state according to the state described in
@@ -636,12 +636,7 @@ static int __init pvh_setup_cpus(struct domain *d, paddr_t entry,
     };
 
     for ( i = 1; i < d->max_vcpus; i++ )
-    {
-        const struct vcpu *p = dom0_setup_vcpu(d, i, cpu);
-
-        if ( p )
-            cpu = p->processor;
-    }
+        dom0_setup_vcpu(d, i);
 
     domain_update_node_affinity(d);
 
