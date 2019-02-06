@@ -94,7 +94,7 @@ DEFINE_PER_CPU(struct null_pcpu, npc);
 /*
  * Virtual CPU
  */
-struct null_vcpu {
+struct null_item {
     struct list_head waitq_elem;
     struct vcpu *vcpu;
 };
@@ -115,9 +115,9 @@ static inline struct null_private *null_priv(const struct scheduler *ops)
     return ops->sched_data;
 }
 
-static inline struct null_vcpu *null_vcpu(const struct vcpu *v)
+static inline struct null_item *null_item(const struct sched_item *item)
 {
-    return v->sched_item->priv;
+    return item->priv;
 }
 
 static inline bool vcpu_check_affinity(struct vcpu *v, unsigned int cpu,
@@ -197,9 +197,9 @@ static void *null_alloc_vdata(const struct scheduler *ops,
                               struct sched_item *item, void *dd)
 {
     struct vcpu *v = item->vcpu;
-    struct null_vcpu *nvc;
+    struct null_item *nvc;
 
-    nvc = xzalloc(struct null_vcpu);
+    nvc = xzalloc(struct null_item);
     if ( nvc == NULL )
         return NULL;
 
@@ -213,7 +213,7 @@ static void *null_alloc_vdata(const struct scheduler *ops,
 
 static void null_free_vdata(const struct scheduler *ops, void *priv)
 {
-    struct null_vcpu *nvc = priv;
+    struct null_item *nvc = priv;
 
     xfree(nvc);
 }
@@ -390,7 +390,7 @@ static void null_switch_sched(struct scheduler *new_ops, unsigned int cpu,
 {
     struct schedule_data *sd = &per_cpu(schedule_data, cpu);
     struct null_private *prv = null_priv(new_ops);
-    struct null_vcpu *nvc = vdata;
+    struct null_item *nvc = vdata;
 
     ASSERT(nvc && is_idle_vcpu(nvc->vcpu));
 
@@ -422,7 +422,7 @@ static void null_item_insert(const struct scheduler *ops,
 {
     struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
-    struct null_vcpu *nvc = null_vcpu(v);
+    struct null_item *nvc = null_item(item);
     unsigned int cpu;
     spinlock_t *lock;
 
@@ -479,9 +479,9 @@ static void _vcpu_remove(struct null_private *prv, struct vcpu *v)
 {
     unsigned int bs;
     unsigned int cpu = v->processor;
-    struct null_vcpu *wvc;
+    struct null_item *wvc;
 
-    ASSERT(list_empty(&null_vcpu(v)->waitq_elem));
+    ASSERT(list_empty(&null_item(v->sched_item)->waitq_elem));
 
     vcpu_deassign(prv, v, cpu);
 
@@ -517,7 +517,7 @@ static void null_item_remove(const struct scheduler *ops,
 {
     struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
-    struct null_vcpu *nvc = null_vcpu(v);
+    struct null_item *nvc = null_item(item);
     spinlock_t *lock;
 
     ASSERT(!is_idle_vcpu(v));
@@ -552,13 +552,13 @@ static void null_item_wake(const struct scheduler *ops,
 
     ASSERT(!is_idle_vcpu(v));
 
-    if ( unlikely(curr_on_cpu(v->processor) == v) )
+    if ( unlikely(curr_on_cpu(v->processor) == item) )
     {
         SCHED_STAT_CRANK(vcpu_wake_running);
         return;
     }
 
-    if ( unlikely(!list_empty(&null_vcpu(v)->waitq_elem)) )
+    if ( unlikely(!list_empty(&null_item(item)->waitq_elem)) )
     {
         /* Not exactly "on runq", but close enough for reusing the counter */
         SCHED_STAT_CRANK(vcpu_wake_onrunq);
@@ -582,7 +582,7 @@ static void null_item_sleep(const struct scheduler *ops,
     ASSERT(!is_idle_vcpu(v));
 
     /* If v is not assigned to a pCPU, or is not running, no need to bother */
-    if ( curr_on_cpu(v->processor) == v )
+    if ( curr_on_cpu(v->processor) == item )
         cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
 
     SCHED_STAT_CRANK(vcpu_sleep);
@@ -600,7 +600,7 @@ static void null_item_migrate(const struct scheduler *ops,
 {
     struct vcpu *v = item->vcpu;
     struct null_private *prv = null_priv(ops);
-    struct null_vcpu *nvc = null_vcpu(v);
+    struct null_item *nvc = null_item(item);
 
     ASSERT(!is_idle_vcpu(v));
 
@@ -685,7 +685,7 @@ static void null_item_migrate(const struct scheduler *ops,
 #ifndef NDEBUG
 static inline void null_vcpu_check(struct vcpu *v)
 {
-    struct null_vcpu * const nvc = null_vcpu(v);
+    struct null_item * const nvc = null_item(v->sched_item);
     struct null_dom * const ndom = v->domain->sched_priv;
 
     BUG_ON(nvc->vcpu != v);
@@ -715,7 +715,7 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     unsigned int bs;
     const unsigned int cpu = smp_processor_id();
     struct null_private *prv = null_priv(ops);
-    struct null_vcpu *wvc;
+    struct null_item *wvc;
     struct task_slice ret;
 
     SCHED_STAT_CRANK(schedule);
@@ -798,7 +798,7 @@ static struct task_slice null_schedule(const struct scheduler *ops,
     return ret;
 }
 
-static inline void dump_vcpu(struct null_private *prv, struct null_vcpu *nvc)
+static inline void dump_vcpu(struct null_private *prv, struct null_item *nvc)
 {
     printk("[%i.%i] pcpu=%d", nvc->vcpu->domain->domain_id,
             nvc->vcpu->vcpu_id, list_empty(&nvc->waitq_elem) ?
@@ -808,7 +808,7 @@ static inline void dump_vcpu(struct null_private *prv, struct null_vcpu *nvc)
 static void null_dump_pcpu(const struct scheduler *ops, int cpu)
 {
     struct null_private *prv = null_priv(ops);
-    struct null_vcpu *nvc;
+    struct null_item *nvc;
     spinlock_t *lock;
     unsigned long flags;
 
@@ -823,7 +823,7 @@ static void null_dump_pcpu(const struct scheduler *ops, int cpu)
     printk("\n");
 
     /* current VCPU (nothing to say if that's the idle vcpu) */
-    nvc = null_vcpu(curr_on_cpu(cpu));
+    nvc = null_item(curr_on_cpu(cpu));
     if ( nvc && !is_idle_vcpu(nvc->vcpu) )
     {
         printk("\trun: ");
@@ -857,7 +857,7 @@ static void null_dump(const struct scheduler *ops)
         printk("\tDomain: %d\n", ndom->dom->domain_id);
         for_each_vcpu( ndom->dom, v )
         {
-            struct null_vcpu * const nvc = null_vcpu(v);
+            struct null_item * const nvc = null_item(v->sched_item);
             spinlock_t *lock;
 
             lock = vcpu_schedule_lock(nvc->vcpu);
@@ -875,7 +875,7 @@ static void null_dump(const struct scheduler *ops)
     spin_lock(&prv->waitq_lock);
     list_for_each( iter, &prv->waitq )
     {
-        struct null_vcpu *nvc = list_entry(iter, struct null_vcpu, waitq_elem);
+        struct null_item *nvc = list_entry(iter, struct null_item, waitq_elem);
 
         if ( loop++ != 0 )
             printk(", ");

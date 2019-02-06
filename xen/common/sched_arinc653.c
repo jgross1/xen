@@ -475,7 +475,7 @@ a653sched_item_sleep(const struct scheduler *ops, struct sched_item *item)
      * If the VCPU being put to sleep is the same one that is currently
      * running, raise a softirq to invoke the scheduler to switch domains.
      */
-    if ( per_cpu(schedule_data, vc->processor).curr == vc )
+    if ( per_cpu(schedule_data, vc->processor).curr == item )
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
 }
 
