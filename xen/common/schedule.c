@@ -174,6 +174,7 @@ static inline void vcpu_runstate_change(
     struct vcpu *v, int new_state, s_time_t new_entry_time)
 {
     s_time_t delta;
+    struct sched_item *item = v->sched_item;
 
     ASSERT(v->runstate.state != new_state);
     ASSERT(spin_is_locked(per_cpu(sched_res, v->processor)->schedule_lock));
@@ -181,6 +182,9 @@ static inline void vcpu_runstate_change(
     vcpu_urgent_count_update(v);
 
     trace_runstate_change(v, new_state);
+
+    item->runstate_cnt[v->runstate.state]--;
+    item->runstate_cnt[new_state]++;
 
     delta = new_entry_time - v->runstate.state_entry_time;
     if ( delta > 0 )
@@ -358,6 +362,8 @@ int sched_init_vcpu(struct vcpu *v)
 
     if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
+
+    item->runstate_cnt[v->runstate.state]++;
 
     if ( is_idle_domain(d) )
         processor = v->vcpu_id;
