@@ -162,7 +162,6 @@ struct vcpu
     struct timer     poll_timer;    /* timeout for SCHEDOP_poll */
 
     struct sched_item *sched_item;
-    void            *sched_priv;    /* scheduler-specific data */
 
     struct vcpu_runstate_info runstate;
 #ifndef CONFIG_COMPAT
@@ -279,6 +278,7 @@ struct vcpu
 
 struct sched_item {
     struct vcpu           *vcpu;
+    void                  *priv;      /* scheduler private data */
 };
 
 /* Per-domain lock can be recursively acquired in fault handlers. */
