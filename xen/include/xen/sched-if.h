@@ -50,6 +50,7 @@ DECLARE_PER_CPU(struct cpupool *, cpupool);
 DECLARE_PER_CPU(struct sched_resource *, sched_res);
 
 struct sched_item {
+    struct domain         *domain;
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;
