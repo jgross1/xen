@@ -6,6 +6,7 @@
  */
 
 #include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/version.h>
 #include <xen/hypercall.h>
 #include <xen/domain_page.h>

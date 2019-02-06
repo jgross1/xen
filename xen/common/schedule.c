@@ -356,7 +356,8 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     if ( is_idle_domain(d) )
     {
         per_cpu(sched_res, v->processor)->curr = item;
-        v->is_running = 1;
+        item->is_running = 1;
+        item->state_entry_time = NOW();
     }
     else
     {
@@ -555,7 +556,7 @@ void vcpu_sleep_sync(struct vcpu *v)
 {
     vcpu_sleep_nosync(v);
 
-    while ( !vcpu_runnable(v) && v->is_running )
+    while ( !vcpu_runnable(v) && vcpu_running(v) )
         cpu_relax();
 
     sync_vcpu_execstate(v);
@@ -680,7 +681,7 @@ static void vcpu_migrate_finish(struct vcpu *v)
      * context_saved(); and in any case, if the bit is cleared, then
      * someone else has already done the work so we don't need to.
      */
-    if ( v->is_running || !test_bit(_VPF_migrating, &v->pause_flags) )
+    if ( vcpu_running(v) || !test_bit(_VPF_migrating, &v->pause_flags) )
         return;
 
     old_cpu = new_cpu = v->processor;
@@ -734,7 +735,7 @@ static void vcpu_migrate_finish(struct vcpu *v)
      * because they both happen in (different) spinlock regions, and those
      * regions are strictly serialised.
      */
-    if ( v->is_running ||
+    if ( vcpu_running(v) ||
          !test_and_clear_bit(_VPF_migrating, &v->pause_flags) )
     {
         sched_spin_unlock_double(old_lock, new_lock, flags);
@@ -762,7 +763,7 @@ void vcpu_force_reschedule(struct vcpu *v)
 {
     spinlock_t *lock = item_schedule_lock_irq(v->sched_item);
 
-    if ( v->is_running )
+    if ( vcpu_running(v) )
         vcpu_migrate_start(v);
 
     item_schedule_unlock_irq(lock, v->sched_item);
@@ -1597,8 +1598,9 @@ static void schedule(void)
      * switch, else lost_records resume will not work properly.
      */
 
-    ASSERT(!next->is_running);
-    next->is_running = 1;
+    ASSERT(!vcpu_running(next));
+    next->sched_item->is_running = 1;
+    next->sched_item->state_entry_time = now;
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
@@ -1619,7 +1621,8 @@ void context_saved(struct vcpu *prev)
     /* Clear running flag /after/ writing context to memory. */
     smp_wmb();
 
-    prev->is_running = 0;
+    prev->sched_item->is_running = 0;
+    prev->sched_item->state_entry_time = NOW();
 
     /* Check for migration request /after/ clearing running flag. */
     smp_mb();

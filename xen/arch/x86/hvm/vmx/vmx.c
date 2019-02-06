@@ -19,6 +19,7 @@
 #include <xen/lib.h>
 #include <xen/trace.h>
 #include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/irq.h>
 #include <xen/softirq.h>
 #include <xen/domain_page.h>
@@ -907,7 +908,7 @@ static void vmx_ctxt_switch_from(struct vcpu *v)
     if ( unlikely(!this_cpu(vmxon)) )
         return;
 
-    if ( !v->is_running )
+    if ( !vcpu_running(v) )
     {
         /*
          * When this vCPU isn't marked as running anymore, a remote pCPU's
@@ -2004,7 +2005,7 @@ static void vmx_process_isr(int isr, struct vcpu *v)
 
 static void __vmx_deliver_posted_interrupt(struct vcpu *v)
 {
-    bool_t running = v->is_running;
+    bool_t running = vcpu_running(v);
 
     vcpu_unblock(v);
     /*

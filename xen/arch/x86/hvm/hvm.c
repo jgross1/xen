@@ -23,6 +23,7 @@
 #include <xen/lib.h>
 #include <xen/trace.h>
 #include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/irq.h>
 #include <xen/softirq.h>
 #include <xen/domain.h>
@@ -3984,7 +3985,7 @@ bool hvm_flush_vcpu_tlb(bool (*flush_vcpu)(void *ctxt, struct vcpu *v),
     /* Now that all VCPUs are signalled to deschedule, we wait... */
     for_each_vcpu ( d, v )
         if ( v != current && flush_vcpu(ctxt, v) )
-            while ( !vcpu_runnable(v) && v->is_running )
+            while ( !vcpu_runnable(v) && vcpu_running(v) )
                 cpu_relax();
 
     /* All other vcpus are paused, safe to unlock now. */
