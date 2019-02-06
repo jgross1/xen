@@ -126,6 +126,18 @@ static void play_dead(void)
     (*dead_idle)();
 }
 
+void guest_idle_loop(void)
+{
+    unsigned int cpu = smp_processor_id();
+
+    for ( ; ; )
+    {
+        if ( !softirq_pending(cpu) )
+            pm_idle();
+        do_softirq();
+    }
+}
+
 static void idle_loop(void)
 {
     unsigned int cpu = smp_processor_id();
@@ -1702,7 +1714,7 @@ static void __context_switch(void)
     gdt = !is_pv_32bit_domain(nd) ? per_cpu(gdt_table, cpu) :
                                     per_cpu(compat_gdt_table, cpu);
 
-    need_full_gdt_n = need_full_gdt(nd);
+    need_full_gdt_n = need_full_gdt(nd) && is_vcpu_online(n);
 
     if ( need_full_gdt_n )
         write_full_gdt_ptes(gdt, n);
@@ -1855,6 +1867,9 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
     /* Ensure that the vcpu has an up-to-date time base. */
     update_vcpu_system_time(next);
 
+    if ( !vcpu_runnable(next) )
+        sched_vcpu_idle(next);
+
     /*
      * Schedule tail *should* be a terminal function pointer, but leave a
      * bug frame around just in case it returns, to save going back into the
@@ -1867,6 +1882,9 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
 void continue_running(struct vcpu *same)
 {
     context_wait_rendezvous_out(same->sched_item, NULL);
+
+    if ( !vcpu_runnable(same) )
+        sched_vcpu_idle(same);
 
     /* See the comment above. */
     same->domain->arch.ctxt_switch->tail(same);

@@ -56,7 +56,7 @@ int sched_ratelimit_us = SCHED_DEFAULT_RATELIMIT_US;
 integer_param("sched_ratelimit_us", sched_ratelimit_us);
 
 /* Number of vcpus per struct sched_item. */
-static unsigned int sched_granularity = 1;
+unsigned int sched_granularity = 1;
 
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
@@ -1122,6 +1122,17 @@ int vcpu_set_hard_affinity(struct vcpu *v, const cpumask_t *affinity)
 int vcpu_set_soft_affinity(struct vcpu *v, const cpumask_t *affinity)
 {
     return vcpu_set_affinity(v, affinity, v->sched_item->cpu_soft_affinity);
+}
+
+void sched_vcpu_idle(struct vcpu *v)
+{
+    if ( !v->is_urgent )
+    {
+        v->is_urgent = 1;
+        atomic_inc(&per_cpu(sched_res, v->processor)->urgent_count);
+    }
+
+    reset_stack_and_jump(guest_idle_loop);
 }
 
 /* Block the currently-executing domain until a pertinent event occurs. */

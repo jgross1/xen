@@ -1541,6 +1541,8 @@ int hvm_vcpu_initialise(struct vcpu *v)
         hvm_set_guest_tsc(v, 0);
     }
 
+    paging_update_paging_modes(v);
+
     return 0;
 
  fail6:

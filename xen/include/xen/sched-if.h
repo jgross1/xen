@@ -201,6 +201,9 @@ static inline unsigned int sched_get_resource_cpu(unsigned int cpu)
     return per_cpu(sched_res, cpu)->processor;
 }
 
+void sched_vcpu_idle(struct vcpu *v);
+void guest_idle_loop(void);
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:

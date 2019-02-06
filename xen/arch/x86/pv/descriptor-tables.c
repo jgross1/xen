@@ -43,7 +43,7 @@ bool pv_destroy_ldt(struct vcpu *v)
     if ( v->arch.pv.shadow_ldt_mapcnt == 0 )
         goto out;
 #else
-    ASSERT(v == current || !vcpu_cpu_dirty(v));
+    ASSERT(v == current || !vcpu_cpu_dirty(v) || (v->pause_flags & VPF_down));
 #endif
 
     pl1e = pv_ldt_ptes(v);
@@ -80,7 +80,7 @@ void pv_destroy_gdt(struct vcpu *v)
     l1_pgentry_t zero_l1e = l1e_from_mfn(zero_mfn, __PAGE_HYPERVISOR_RO);
     unsigned int i;
 
-    ASSERT(v == current || !vcpu_cpu_dirty(v));
+    ASSERT(v == current || !vcpu_cpu_dirty(v) || (v->pause_flags & VPF_down));
 
     v->arch.pv.gdt_ents = 0;
     for ( i = 0; i < FIRST_RESERVED_GDT_PAGE; i++ )
@@ -102,7 +102,7 @@ long pv_set_gdt(struct vcpu *v, unsigned long *frames, unsigned int entries)
     l1_pgentry_t *pl1e;
     unsigned int i, nr_frames = DIV_ROUND_UP(entries, 512);
 
-    ASSERT(v == current || !vcpu_cpu_dirty(v));
+    ASSERT(v == current || !vcpu_cpu_dirty(v) || (v->pause_flags & VPF_down));
 
     if ( entries > FIRST_RESERVED_GDT_ENTRY )
         return -EINVAL;

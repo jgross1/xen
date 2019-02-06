@@ -3015,8 +3015,14 @@ int vcpu_destroy_pagetables(struct vcpu *v)
 {
     unsigned long mfn = pagetable_get_pfn(v->arch.guest_table);
     struct page_info *page;
-    l4_pgentry_t *l4tab = NULL;
+    l4_pgentry_t *l4tab = v->domain->arch.pv.l4tab_idle;
     int rc = put_old_guest_table(v);
+
+    if ( l4tab && mfn == __virt_to_mfn(l4tab) )
+    {
+        v->arch.guest_table = pagetable_null();
+        mfn = 0;
+    }
 
     if ( rc )
         return rc;
@@ -3026,6 +3032,8 @@ int vcpu_destroy_pagetables(struct vcpu *v)
         l4tab = map_domain_page(_mfn(mfn));
         mfn = l4e_get_pfn(*l4tab);
     }
+    else
+        l4tab = NULL;
 
     if ( mfn )
     {
