@@ -48,6 +48,10 @@ DECLARE_PER_CPU(struct schedule_data, schedule_data);
 DECLARE_PER_CPU(struct scheduler *, scheduler);
 DECLARE_PER_CPU(struct cpupool *, cpupool);
 
+struct sched_item {
+    struct vcpu           *vcpu;
+};
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:
@@ -141,8 +145,8 @@ struct scheduler {
     void         (*deinit)         (struct scheduler *);
 
     void         (*free_vdata)     (const struct scheduler *, void *);
-    void *       (*alloc_vdata)    (const struct scheduler *, struct vcpu *,
-                                    void *);
+    void *       (*alloc_vdata)    (const struct scheduler *,
+                                    struct sched_item *, void *);
     void         (*free_pdata)     (const struct scheduler *, void *, int);
     void *       (*alloc_pdata)    (const struct scheduler *, int);
     void         (*init_pdata)     (const struct scheduler *, void *, int);
@@ -156,24 +160,32 @@ struct scheduler {
     void         (*switch_sched)   (struct scheduler *, unsigned int,
                                     void *, void *);
 
-    /* Activate / deactivate vcpus in a cpu pool */
-    void         (*insert_vcpu)    (const struct scheduler *, struct vcpu *);
-    void         (*remove_vcpu)    (const struct scheduler *, struct vcpu *);
+    /* Activate / deactivate items in a cpu pool */
+    void         (*insert_item)    (const struct scheduler *,
+                                    struct sched_item *);
+    void         (*remove_item)    (const struct scheduler *,
+                                    struct sched_item *);
 
-    void         (*sleep)          (const struct scheduler *, struct vcpu *);
-    void         (*wake)           (const struct scheduler *, struct vcpu *);
-    void         (*yield)          (const struct scheduler *, struct vcpu *);
-    void         (*context_saved)  (const struct scheduler *, struct vcpu *);
+    void         (*sleep)          (const struct scheduler *,
+                                    struct sched_item *);
+    void         (*wake)           (const struct scheduler *,
+                                    struct sched_item *);
+    void         (*yield)          (const struct scheduler *,
+                                    struct sched_item *);
+    void         (*context_saved)  (const struct scheduler *,
+                                    struct sched_item *);
 
     struct task_slice (*do_schedule) (const struct scheduler *, s_time_t,
                                       bool_t tasklet_work_scheduled);
 
-    int          (*pick_cpu)       (const struct scheduler *, struct vcpu *);
-    void         (*migrate)        (const struct scheduler *, struct vcpu *,
-                                    unsigned int);
+    int          (*pick_cpu)       (const struct scheduler *,
+                                    struct sched_item *);
+    void         (*migrate)        (const struct scheduler *,
+                                    struct sched_item *, unsigned int);
     int          (*adjust)         (const struct scheduler *, struct domain *,
                                     struct xen_domctl_scheduler_op *);
-    void         (*adjust_affinity)(const struct scheduler *, struct vcpu *,
+    void         (*adjust_affinity)(const struct scheduler *,
+                                    struct sched_item *,
                                     const struct cpumask *,
                                     const struct cpumask *);
     int          (*adjust_global)  (const struct scheduler *,
