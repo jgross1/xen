@@ -249,6 +249,52 @@ static void sched_spin_unlock_double(spinlock_t *lock1, spinlock_t *lock2,
     spin_unlock_irqrestore(lock1, flags);
 }
 
+static void sched_free_item(struct sched_item *item)
+{
+    struct sched_item *prev_item;
+    struct domain *d = item->vcpu->domain;
+
+    if ( d->sched_item_list == item )
+        d->sched_item_list = item->next_in_list;
+    else
+    {
+        for_each_sched_item(d, prev_item)
+        {
+            if ( prev_item->next_in_list == item )
+            {
+                prev_item->next_in_list = item->next_in_list;
+                break;
+            }
+        }
+    }
+
+    item->vcpu->sched_item = NULL;
+    xfree(item);
+}
+
+static struct sched_item *sched_alloc_item(struct vcpu *v)
+{
+    struct sched_item *item, **prev_item;
+    struct domain *d = v->domain;
+
+    if ( (item = xzalloc(struct sched_item)) == NULL )
+        return NULL;
+
+    v->sched_item = item;
+    item->vcpu = v;
+
+    for ( prev_item = &d->sched_item_list; *prev_item;
+          prev_item = &(*prev_item)->next_in_list )
+        if ( (*prev_item)->next_in_list &&
+             (*prev_item)->next_in_list->vcpu->vcpu_id > v->vcpu_id )
+            break;
+
+    item->next_in_list = *prev_item;
+    *prev_item = item;
+
+    return item;
+}
+
 int sched_init_vcpu(struct vcpu *v, unsigned int processor)
 {
     struct domain *d = v->domain;
@@ -256,10 +302,8 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
 
     v->processor = processor;
 
-    if ( (item = xzalloc(struct sched_item)) == NULL )
+    if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
-    v->sched_item = item;
-    item->vcpu = v;
 
     /* Initialise the per-vcpu timers. */
     init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
@@ -272,8 +316,7 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     item->priv = sched_alloc_vdata(dom_scheduler(d), item, d->sched_priv);
     if ( item->priv == NULL )
     {
-        v->sched_item = NULL;
-        xfree(item);
+        sched_free_item(item);
         return 1;
     }
 
@@ -416,8 +459,7 @@ void sched_destroy_vcpu(struct vcpu *v)
         atomic_dec(&per_cpu(schedule_data, v->processor).urgent_count);
     sched_remove_item(vcpu_scheduler(v), item);
     sched_free_vdata(vcpu_scheduler(v), item->priv);
-    xfree(item);
-    v->sched_item = NULL;
+    sched_free_item(item);
 }
 
 int sched_init_domain(struct domain *d, int poolid)
