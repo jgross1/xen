@@ -314,13 +314,41 @@ static struct sched_item *sched_alloc_item(struct vcpu *v)
     return NULL;
 }
 
-int sched_init_vcpu(struct vcpu *v, unsigned int processor)
+static unsigned int sched_select_initial_cpu(struct vcpu *v)
+{
+    struct domain *d = v->domain;
+    nodeid_t node;
+    cpumask_t cpus;
+
+    cpumask_clear(&cpus);
+    for_each_node_mask ( node, d->node_affinity )
+        cpumask_or(&cpus, &cpus, &node_to_cpumask(node));
+    cpumask_and(&cpus, &cpus, cpupool_domain_cpumask(d));
+    if ( cpumask_empty(&cpus) )
+        cpumask_copy(&cpus, cpupool_domain_cpumask(d));
+
+    if ( v->vcpu_id == 0 )
+        return cpumask_first(&cpus);
+
+    /* We can rely on previous vcpu being available. */
+    ASSERT(!is_idle_domain(d));
+
+    return cpumask_cycle(d->vcpu[v->vcpu_id - 1]->processor, &cpus);
+}
+
+int sched_init_vcpu(struct vcpu *v)
 {
     struct domain *d = v->domain;
     struct sched_item *item;
+    unsigned int processor;
 
     if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
+
+    if ( is_idle_domain(d) )
+        processor = v->vcpu_id;
+    else
+        processor = sched_select_initial_cpu(v);
 
     sched_set_res(item, per_cpu(sched_res, processor));
 
@@ -1673,7 +1701,7 @@ static int cpu_schedule_up(unsigned int cpu)
         return 0;
 
     if ( idle_vcpu[cpu] == NULL )
-        vcpu_create(idle_vcpu[0]->domain, cpu, cpu);
+        vcpu_create(idle_vcpu[0]->domain, cpu);
     else
     {
         struct vcpu *idle = idle_vcpu[cpu];
@@ -1867,7 +1895,7 @@ void __init scheduler_init(void)
     BUG_ON(nr_cpu_ids > ARRAY_SIZE(idle_vcpu));
     idle_domain->vcpu = idle_vcpu;
     idle_domain->max_vcpus = nr_cpu_ids;
-    if ( vcpu_create(idle_domain, 0, 0) == NULL )
+    if ( vcpu_create(idle_domain, 0) == NULL )
         BUG();
     this_cpu(sched_res)->curr = idle_vcpu[0]->sched_item;
     this_cpu(sched_res)->sched_priv = sched_alloc_pdata(&ops, 0);
