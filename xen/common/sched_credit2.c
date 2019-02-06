@@ -625,9 +625,9 @@ static inline bool has_cap(const struct csched2_vcpu *svc)
  * runq, _always_ happens by means of tickling:
  *  - when a vcpu wakes up, it calls csched2_item_wake(), which calls
  *    runq_tickle();
- *  - when a migration is initiated in schedule.c, we call csched2_cpu_pick(),
+ *  - when a migration is initiated in schedule.c, we call csched2_res_pick(),
  *    csched2_item_migrate() (which calls migrate()) and csched2_item_wake().
- *    csched2_cpu_pick() looks for the least loaded runq and return just any
+ *    csched2_res_pick() looks for the least loaded runq and return just any
  *    of its processors. Then, csched2_item_migrate() just moves the vcpu to
  *    the chosen runq, and it is again runq_tickle(), called by
  *    csched2_item_wake() that actually decides what pcpu to use within the
@@ -676,7 +676,7 @@ void smt_idle_mask_clear(unsigned int cpu, cpumask_t *mask)
 }
 
 /*
- * In csched2_cpu_pick(), it may not be possible to actually look at remote
+ * In csched2_res_pick(), it may not be possible to actually look at remote
  * runqueues (the trylock-s on their spinlocks can fail!). If that happens,
  * we pick, in order of decreasing preference:
  *  1) svc's current pcpu, if it is part of svc's soft affinity;
@@ -2201,8 +2201,8 @@ csched2_context_saved(const struct scheduler *ops, struct sched_item *item)
 }
 
 #define MAX_LOAD (STIME_MAX)
-static int
-csched2_cpu_pick(const struct scheduler *ops, struct sched_item *item)
+static struct sched_resource *
+csched2_res_pick(const struct scheduler *ops, struct sched_item *item)
 {
     struct csched2_private *prv = csched2_priv(ops);
     struct vcpu *vc = item->vcpu;
@@ -2214,7 +2214,7 @@ csched2_cpu_pick(const struct scheduler *ops, struct sched_item *item)
 
     ASSERT(!cpumask_empty(&prv->active_queues));
 
-    SCHED_STAT_CRANK(pick_cpu);
+    SCHED_STAT_CRANK(pick_resource);
 
     /* Locking:
      * - Runqueue lock of vc->processor is already locked
@@ -2423,7 +2423,7 @@ csched2_cpu_pick(const struct scheduler *ops, struct sched_item *item)
                     (unsigned char *)&d);
     }
 
-    return new_cpu;
+    return per_cpu(sched_res, new_cpu);
 }
 
 /* Working state of the load-balancing algorithm */
@@ -3120,11 +3120,11 @@ csched2_item_insert(const struct scheduler *ops, struct sched_item *item)
     ASSERT(!is_idle_vcpu(vc));
     ASSERT(list_empty(&svc->runq_elem));
 
-    /* csched2_cpu_pick() expects the pcpu lock to be held */
+    /* csched2_res_pick() expects the pcpu lock to be held */
     lock = vcpu_schedule_lock_irq(vc);
 
-    vc->processor = csched2_cpu_pick(ops, item);
-    item->res = per_cpu(sched_res, vc->processor);
+    item->res = csched2_res_pick(ops, item);
+    vc->processor = item->res->processor;
 
     spin_unlock_irq(lock);
 
@@ -4113,7 +4113,7 @@ static const struct scheduler sched_credit2_def = {
     .adjust_affinity= csched2_aff_cntl,
     .adjust_global  = csched2_sys_cntl,
 
-    .pick_cpu       = csched2_cpu_pick,
+    .pick_resource  = csched2_res_pick,
     .migrate        = csched2_item_migrate,
     .do_schedule    = csched2_schedule,
     .context_saved  = csched2_context_saved,

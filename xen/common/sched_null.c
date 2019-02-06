@@ -269,9 +269,11 @@ static void null_free_domdata(const struct scheduler *ops, void *data)
  *
  * So this is not part of any hot path.
  */
-static unsigned int pick_cpu(struct null_private *prv, struct vcpu *v)
+static struct sched_resource *
+pick_res(struct null_private *prv, struct sched_item *item)
 {
     unsigned int bs;
+    struct vcpu *v = item->vcpu;
     unsigned int cpu = v->processor, new_cpu;
     cpumask_t *cpus = cpupool_domain_cpumask(v->domain);
 
@@ -335,7 +337,7 @@ static unsigned int pick_cpu(struct null_private *prv, struct vcpu *v)
         __trace_var(TRC_SNULL_PICKED_CPU, 1, sizeof(d), &d);
     }
 
-    return new_cpu;
+    return per_cpu(sched_res, new_cpu);
 }
 
 static void vcpu_assign(struct null_private *prv, struct vcpu *v,
@@ -429,8 +431,8 @@ static void null_item_insert(const struct scheduler *ops,
     lock = vcpu_schedule_lock_irq(v);
  retry:
 
-    cpu = v->processor = pick_cpu(prv, v);
-    item->res = per_cpu(sched_res, cpu);
+    item->res = pick_res(prv, item);
+    cpu = v->processor = item->res->processor;
 
     spin_unlock(lock);
 
@@ -586,11 +588,11 @@ static void null_item_sleep(const struct scheduler *ops,
     SCHED_STAT_CRANK(vcpu_sleep);
 }
 
-static int null_cpu_pick(const struct scheduler *ops, struct sched_item *item)
+static struct sched_resource *
+null_res_pick(const struct scheduler *ops, struct sched_item *item)
 {
-    struct vcpu *v = item->vcpu;
-    ASSERT(!is_idle_vcpu(v));
-    return pick_cpu(null_priv(ops), v);
+    ASSERT(!is_idle_vcpu(item->vcpu));
+    return pick_res(null_priv(ops), item);
 }
 
 static void null_item_migrate(const struct scheduler *ops,
@@ -909,7 +911,7 @@ const struct scheduler sched_null_def = {
 
     .wake           = null_item_wake,
     .sleep          = null_item_sleep,
-    .pick_cpu       = null_cpu_pick,
+    .pick_resource  = null_res_pick,
     .migrate        = null_item_migrate,
     .do_schedule    = null_schedule,
 

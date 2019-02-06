@@ -179,8 +179,8 @@ struct scheduler {
     struct task_slice (*do_schedule) (const struct scheduler *, s_time_t,
                                       bool_t tasklet_work_scheduled);
 
-    int          (*pick_cpu)       (const struct scheduler *,
-                                    struct sched_item *);
+    struct sched_resource * (*pick_resource) (const struct scheduler *,
+                                              struct sched_item *);
     void         (*migrate)        (const struct scheduler *,
                                     struct sched_item *, unsigned int);
     int          (*adjust)         (const struct scheduler *, struct domain *,
@@ -373,11 +373,11 @@ static inline void sched_migrate(const struct scheduler *s,
     }
 }
 
-static inline int sched_pick_cpu(const struct scheduler *s,
-                                 struct sched_item *item)
+static inline struct sched_resource *sched_pick_resource(
+    const struct scheduler *s, struct sched_item *item)
 {
-    ASSERT(s->pick_cpu);
-    return s->pick_cpu(s, item);
+    ASSERT(s->pick_resource);
+    return s->pick_resource(s, item);
 }
 
 static inline void sched_adjust_affinity(const struct scheduler *s,
