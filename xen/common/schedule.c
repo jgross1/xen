@@ -808,21 +808,24 @@ static void vcpu_migrate_finish(struct vcpu *v)
 }
 
 /*
- * Force a VCPU through a deschedule/reschedule path.
- * For example, using this when setting the periodic timer period means that
- * most periodic-timer state need only be touched from within the scheduler
- * which can thus be done without need for synchronisation.
+ * Set the periodic timer of a vcpu.
  */
-void vcpu_force_reschedule(struct vcpu *v)
+void vcpu_set_periodic_timer(struct vcpu *v, s_time_t value)
 {
-    spinlock_t *lock = item_schedule_lock_irq(v->sched_item);
+    s_time_t now = NOW();
 
-    if ( v->sched_item->is_running )
-        vcpu_migrate_start(v);
+    if ( v != current )
+        vcpu_pause(v);
+    else
+        stop_timer(&v->periodic_timer);
 
-    item_schedule_unlock_irq(lock, v->sched_item);
+    v->periodic_period = value;
+    v->periodic_last_event = now;
 
-    vcpu_migrate_finish(v);
+    if ( v != current )
+        vcpu_unpause(v);
+    else if ( value != 0 )
+        set_timer(&v->periodic_timer, now + value);
 }
 
 void restore_vcpu_affinity(struct domain *d)
