@@ -347,7 +347,7 @@ int sched_init_vcpu(struct vcpu *v)
     if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
 
-    if ( is_idle_domain(d) || d->is_pinned )
+    if ( is_idle_domain(d) )
         processor = v->vcpu_id;
     else
         processor = sched_select_initial_cpu(v);
