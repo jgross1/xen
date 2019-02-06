@@ -45,15 +45,15 @@
 #define DEFAULT_TIMESLICE MILLISECS(10)
 
 /**
- * Retrieve the idle VCPU for a given physical CPU
+ * Retrieve the idle ITEM for a given physical CPU
  */
-#define IDLETASK(cpu)  (idle_vcpu[cpu])
+#define IDLETASK(cpu)  (sched_idle_item(cpu))
 
 /**
  * Return a pointer to the ARINC 653-specific scheduler data information
- * associated with the given VCPU (vc)
+ * associated with the given ITEM (item)
  */
-#define AVCPU(vc) ((arinc653_vcpu_t *)(vc)->sched_item->priv)
+#define AITEM(item) ((arinc653_item_t *)(item)->priv)
 
 /**
  * Return the global scheduler private data given the scheduler ops pointer
@@ -65,20 +65,20 @@
  **************************************************************************/
 
 /**
- * The arinc653_vcpu_t structure holds ARINC 653-scheduler-specific
- * information for all non-idle VCPUs
+ * The arinc653_item_t structure holds ARINC 653-scheduler-specific
+ * information for all non-idle ITEMs
  */
-typedef struct arinc653_vcpu_s
+typedef struct arinc653_item_s
 {
-    /* vc points to Xen's struct vcpu so we can get to it from an
-     * arinc653_vcpu_t pointer. */
-    struct vcpu *       vc;
-    /* awake holds whether the VCPU has been woken with vcpu_wake() */
+    /* item points to Xen's struct sched_item so we can get to it from an
+     * arinc653_item_t pointer. */
+    struct sched_item * item;
+    /* awake holds whether the ITEM has been woken with vcpu_wake() */
     bool_t              awake;
-    /* list holds the linked list information for the list this VCPU
+    /* list holds the linked list information for the list this ITEM
      * is stored in */
     struct list_head    list;
-} arinc653_vcpu_t;
+} arinc653_item_t;
 
 /**
  * The sched_entry_t structure holds a single entry of the
@@ -89,14 +89,14 @@ typedef struct sched_entry_s
     /* dom_handle holds the handle ("UUID") for the domain that this
      * schedule entry refers to. */
     xen_domain_handle_t dom_handle;
-    /* vcpu_id holds the VCPU number for the VCPU that this schedule
+    /* item_id holds the ITEM number for the ITEM that this schedule
      * entry refers to. */
-    int                 vcpu_id;
-    /* runtime holds the number of nanoseconds that the VCPU for this
+    int                 item_id;
+    /* runtime holds the number of nanoseconds that the ITEM for this
      * schedule entry should be allowed to run per major frame. */
     s_time_t            runtime;
-    /* vc holds a pointer to the Xen VCPU structure */
-    struct vcpu *       vc;
+    /* item holds a pointer to the Xen sched_item structure */
+    struct sched_item * item;
 } sched_entry_t;
 
 /**
@@ -110,9 +110,9 @@ typedef struct a653sched_priv_s
     /**
      * This array holds the active ARINC 653 schedule.
      *
-     * When the system tries to start a new VCPU, this schedule is scanned
-     * to look for a matching (handle, VCPU #) pair. If both the handle (UUID)
-     * and VCPU number match, then the VCPU is allowed to run. Its run time
+     * When the system tries to start a new ITEM, this schedule is scanned
+     * to look for a matching (handle, ITEM #) pair. If both the handle (UUID)
+     * and ITEM number match, then the ITEM is allowed to run. Its run time
      * (per major frame) is given in the third entry of the schedule.
      */
     sched_entry_t schedule[ARINC653_MAX_DOMAINS_PER_SCHEDULE];
@@ -123,8 +123,8 @@ typedef struct a653sched_priv_s
      *
      * This is not necessarily the same as the number of domains in the
      * schedule. A domain could be listed multiple times within the schedule,
-     * or a domain with multiple VCPUs could have a different
-     * schedule entry for each VCPU.
+     * or a domain with multiple ITEMs could have a different
+     * schedule entry for each ITEM.
      */
     unsigned int num_schedule_entries;
 
@@ -139,9 +139,9 @@ typedef struct a653sched_priv_s
     s_time_t next_major_frame;
 
     /**
-     * pointers to all Xen VCPU structures for iterating through
+     * pointers to all Xen ITEM structures for iterating through
      */
-    struct list_head vcpu_list;
+    struct list_head item_list;
 } a653sched_priv_t;
 
 /**************************************************************************
@@ -167,50 +167,50 @@ static int dom_handle_cmp(const xen_domain_handle_t h1,
 }
 
 /**
- * This function searches the vcpu list to find a VCPU that matches
- * the domain handle and VCPU ID specified.
+ * This function searches the item list to find a ITEM that matches
+ * the domain handle and ITEM ID specified.
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param handle    Pointer to handler
- * @param vcpu_id   VCPU ID
+ * @param item_id   ITEM ID
  *
  * @return          <ul>
- *                  <li> Pointer to the matching VCPU if one is found
+ *                  <li> Pointer to the matching ITEM if one is found
  *                  <li> NULL otherwise
  *                  </ul>
  */
-static struct vcpu *find_vcpu(
+static struct sched_item *find_item(
     const struct scheduler *ops,
     xen_domain_handle_t handle,
-    int vcpu_id)
+    int item_id)
 {
-    arinc653_vcpu_t *avcpu;
+    arinc653_item_t *aitem;
 
-    /* loop through the vcpu_list looking for the specified VCPU */
-    list_for_each_entry ( avcpu, &SCHED_PRIV(ops)->vcpu_list, list )
-        if ( (dom_handle_cmp(avcpu->vc->domain->handle, handle) == 0)
-             && (vcpu_id == avcpu->vc->vcpu_id) )
-            return avcpu->vc;
+    /* loop through the item_list looking for the specified ITEM */
+    list_for_each_entry ( aitem, &SCHED_PRIV(ops)->item_list, list )
+        if ( (dom_handle_cmp(aitem->item->domain->handle, handle) == 0)
+             && (item_id == aitem->item->item_id) )
+            return aitem->item;
 
     return NULL;
 }
 
 /**
- * This function updates the pointer to the Xen VCPU structure for each entry
+ * This function updates the pointer to the Xen ITEM structure for each entry
  * in the ARINC 653 schedule.
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @return          <None>
  */
-static void update_schedule_vcpus(const struct scheduler *ops)
+static void update_schedule_items(const struct scheduler *ops)
 {
     unsigned int i, n_entries = SCHED_PRIV(ops)->num_schedule_entries;
 
     for ( i = 0; i < n_entries; i++ )
-        SCHED_PRIV(ops)->schedule[i].vc =
-            find_vcpu(ops,
+        SCHED_PRIV(ops)->schedule[i].item =
+            find_item(ops,
                       SCHED_PRIV(ops)->schedule[i].dom_handle,
-                      SCHED_PRIV(ops)->schedule[i].vcpu_id);
+                      SCHED_PRIV(ops)->schedule[i].item_id);
 }
 
 /**
@@ -268,12 +268,12 @@ arinc653_sched_set(
         memcpy(sched_priv->schedule[i].dom_handle,
                schedule->sched_entries[i].dom_handle,
                sizeof(sched_priv->schedule[i].dom_handle));
-        sched_priv->schedule[i].vcpu_id =
+        sched_priv->schedule[i].item_id =
             schedule->sched_entries[i].vcpu_id;
         sched_priv->schedule[i].runtime =
             schedule->sched_entries[i].runtime;
     }
-    update_schedule_vcpus(ops);
+    update_schedule_items(ops);
 
     /*
      * The newly-installed schedule takes effect immediately. We do not even
@@ -319,7 +319,7 @@ arinc653_sched_get(
         memcpy(schedule->sched_entries[i].dom_handle,
                sched_priv->schedule[i].dom_handle,
                sizeof(sched_priv->schedule[i].dom_handle));
-        schedule->sched_entries[i].vcpu_id = sched_priv->schedule[i].vcpu_id;
+        schedule->sched_entries[i].vcpu_id = sched_priv->schedule[i].item_id;
         schedule->sched_entries[i].runtime = sched_priv->schedule[i].runtime;
     }
 
@@ -355,7 +355,7 @@ a653sched_init(struct scheduler *ops)
 
     prv->next_major_frame = 0;
     spin_lock_init(&prv->lock);
-    INIT_LIST_HEAD(&prv->vcpu_list);
+    INIT_LIST_HEAD(&prv->item_list);
 
     return 0;
 }
@@ -373,7 +373,7 @@ a653sched_deinit(struct scheduler *ops)
 }
 
 /**
- * This function allocates scheduler-specific data for a VCPU
+ * This function allocates scheduler-specific data for a ITEM
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param item      Pointer to struct sched_item
@@ -385,35 +385,34 @@ a653sched_alloc_vdata(const struct scheduler *ops, struct sched_item *item,
                       void *dd)
 {
     a653sched_priv_t *sched_priv = SCHED_PRIV(ops);
-    struct vcpu *vc = item->vcpu;
-    arinc653_vcpu_t *svc;
+    arinc653_item_t *svc;
     unsigned int entry;
     unsigned long flags;
 
     /*
      * Allocate memory for the ARINC 653-specific scheduler data information
-     * associated with the given VCPU (vc).
+     * associated with the given ITEM (item).
      */
-    svc = xmalloc(arinc653_vcpu_t);
+    svc = xmalloc(arinc653_item_t);
     if ( svc == NULL )
         return NULL;
 
     spin_lock_irqsave(&sched_priv->lock, flags);
 
-    /* 
-     * Add every one of dom0's vcpus to the schedule, as long as there are
+    /*
+     * Add every one of dom0's items to the schedule, as long as there are
      * slots available.
      */
-    if ( vc->domain->domain_id == 0 )
+    if ( item->domain->domain_id == 0 )
     {
         entry = sched_priv->num_schedule_entries;
 
         if ( entry < ARINC653_MAX_DOMAINS_PER_SCHEDULE )
         {
             sched_priv->schedule[entry].dom_handle[0] = '\0';
-            sched_priv->schedule[entry].vcpu_id = vc->vcpu_id;
+            sched_priv->schedule[entry].item_id = item->item_id;
             sched_priv->schedule[entry].runtime = DEFAULT_TIMESLICE;
-            sched_priv->schedule[entry].vc = vc;
+            sched_priv->schedule[entry].item = item;
 
             sched_priv->major_frame += DEFAULT_TIMESLICE;
             ++sched_priv->num_schedule_entries;
@@ -421,16 +420,16 @@ a653sched_alloc_vdata(const struct scheduler *ops, struct sched_item *item,
     }
 
     /*
-     * Initialize our ARINC 653 scheduler-specific information for the VCPU.
-     * The VCPU starts "asleep." When Xen is ready for the VCPU to run, it
+     * Initialize our ARINC 653 scheduler-specific information for the ITEM.
+     * The ITEM starts "asleep." When Xen is ready for the ITEM to run, it
      * will call the vcpu_wake scheduler callback function and our scheduler
-     * will mark the VCPU awake.
+     * will mark the ITEM awake.
      */
-    svc->vc = vc;
+    svc->item = item;
     svc->awake = 0;
-    if ( !is_idle_vcpu(vc) )
-        list_add(&svc->list, &SCHED_PRIV(ops)->vcpu_list);
-    update_schedule_vcpus(ops);
+    if ( !is_idle_item(item) )
+        list_add(&svc->list, &SCHED_PRIV(ops)->item_list);
+    update_schedule_items(ops);
 
     spin_unlock_irqrestore(&sched_priv->lock, flags);
 
@@ -438,27 +437,27 @@ a653sched_alloc_vdata(const struct scheduler *ops, struct sched_item *item,
 }
 
 /**
- * This function frees scheduler-specific VCPU data
+ * This function frees scheduler-specific ITEM data
  *
  * @param ops       Pointer to this instance of the scheduler structure
  */
 static void
 a653sched_free_vdata(const struct scheduler *ops, void *priv)
 {
-    arinc653_vcpu_t *av = priv;
+    arinc653_item_t *av = priv;
 
     if (av == NULL)
         return;
 
-    if ( !is_idle_vcpu(av->vc) )
+    if ( !is_idle_item(av->item) )
         list_del(&av->list);
 
     xfree(av);
-    update_schedule_vcpus(ops);
+    update_schedule_items(ops);
 }
 
 /**
- * Xen scheduler callback function to sleep a VCPU
+ * Xen scheduler callback function to sleep a ITEM
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param item      Pointer to struct sched_item
@@ -466,21 +465,19 @@ a653sched_free_vdata(const struct scheduler *ops, void *priv)
 static void
 a653sched_item_sleep(const struct scheduler *ops, struct sched_item *item)
 {
-    struct vcpu *vc = item->vcpu;
-
-    if ( AVCPU(vc) != NULL )
-        AVCPU(vc)->awake = 0;
+    if ( AITEM(item) != NULL )
+        AITEM(item)->awake = 0;
 
     /*
-     * If the VCPU being put to sleep is the same one that is currently
+     * If the ITEM being put to sleep is the same one that is currently
      * running, raise a softirq to invoke the scheduler to switch domains.
      */
-    if ( per_cpu(sched_res, vc->processor)->curr == item )
-        cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
+    if ( per_cpu(sched_res, sched_item_cpu(item))->curr == item )
+        cpu_raise_softirq(sched_item_cpu(item), SCHEDULE_SOFTIRQ);
 }
 
 /**
- * Xen scheduler callback function to wake up a VCPU
+ * Xen scheduler callback function to wake up a ITEM
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param item      Pointer to struct sched_item
@@ -488,24 +485,22 @@ a653sched_item_sleep(const struct scheduler *ops, struct sched_item *item)
 static void
 a653sched_item_wake(const struct scheduler *ops, struct sched_item *item)
 {
-    struct vcpu *vc = item->vcpu;
+    if ( AITEM(item) != NULL )
+        AITEM(item)->awake = 1;
 
-    if ( AVCPU(vc) != NULL )
-        AVCPU(vc)->awake = 1;
-
-    cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
+    cpu_raise_softirq(sched_item_cpu(item), SCHEDULE_SOFTIRQ);
 }
 
 /**
- * Xen scheduler callback function to select a VCPU to run.
+ * Xen scheduler callback function to select a ITEM to run.
  * This is the main scheduler routine.
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param now       Current time
  *
- * @return          Address of the VCPU structure scheduled to be run next
- *                  Amount of time to execute the returned VCPU
- *                  Flag for whether the VCPU was migrated
+ * @return          Address of the ITEM structure scheduled to be run next
+ *                  Amount of time to execute the returned ITEM
+ *                  Flag for whether the ITEM was migrated
  */
 static struct task_slice
 a653sched_do_schedule(
@@ -514,7 +509,7 @@ a653sched_do_schedule(
     bool_t tasklet_work_scheduled)
 {
     struct task_slice ret;                      /* hold the chosen domain */
-    struct vcpu * new_task = NULL;
+    struct sched_item *new_task = NULL;
     static unsigned int sched_index = 0;
     static s_time_t next_switch_time;
     a653sched_priv_t *sched_priv = SCHED_PRIV(ops);
@@ -559,14 +554,14 @@ a653sched_do_schedule(
      * sched_item structure.
      */
     new_task = (sched_index < sched_priv->num_schedule_entries)
-        ? sched_priv->schedule[sched_index].vc
+        ? sched_priv->schedule[sched_index].item
         : IDLETASK(cpu);
 
     /* Check to see if the new task can be run (awake & runnable). */
     if ( !((new_task != NULL)
-           && (AVCPU(new_task) != NULL)
-           && AVCPU(new_task)->awake
-           && vcpu_runnable(new_task)) )
+           && (AITEM(new_task) != NULL)
+           && AITEM(new_task)->awake
+           && item_runnable(new_task)) )
         new_task = IDLETASK(cpu);
     BUG_ON(new_task == NULL);
 
@@ -578,21 +573,21 @@ a653sched_do_schedule(
 
     spin_unlock_irqrestore(&sched_priv->lock, flags);
 
-    /* Tasklet work (which runs in idle VCPU context) overrides all else. */
+    /* Tasklet work (which runs in idle ITEM context) overrides all else. */
     if ( tasklet_work_scheduled )
         new_task = IDLETASK(cpu);
 
     /* Running this task would result in a migration */
-    if ( !is_idle_vcpu(new_task)
-         && (new_task->processor != cpu) )
+    if ( !is_idle_item(new_task)
+         && (sched_item_cpu(new_task) != cpu) )
         new_task = IDLETASK(cpu);
 
     /*
      * Return the amount of time the next domain has to run and the address
-     * of the selected task's VCPU structure.
+     * of the selected task's ITEM structure.
      */
     ret.time = next_switch_time - now;
-    ret.task = new_task->sched_item;
+    ret.task = new_task;
     ret.migrated = 0;
 
     BUG_ON(ret.time <= 0);
@@ -601,7 +596,7 @@ a653sched_do_schedule(
 }
 
 /**
- * Xen scheduler callback function to select a resource for the VCPU to run on
+ * Xen scheduler callback function to select a resource for the ITEM to run on
  *
  * @param ops       Pointer to this instance of the scheduler structure
  * @param item      Pointer to struct sched_item
@@ -611,21 +606,20 @@ a653sched_do_schedule(
 static struct sched_resource *
 a653sched_pick_resource(const struct scheduler *ops, struct sched_item *item)
 {
-    struct vcpu *vc = item->vcpu;
     cpumask_t *online;
     unsigned int cpu;
 
-    /* 
-     * If present, prefer vc's current processor, else
-     * just find the first valid vcpu .
+    /*
+     * If present, prefer item's current processor, else
+     * just find the first valid item.
      */
-    online = cpupool_domain_cpumask(vc->domain);
+    online = cpupool_domain_cpumask(item->domain);
 
     cpu = cpumask_first(online);
 
-    if ( cpumask_test_cpu(vc->processor, online)
+    if ( cpumask_test_cpu(sched_item_cpu(item), online)
          || (cpu >= nr_cpu_ids) )
-        cpu = vc->processor;
+        cpu = sched_item_cpu(item);
 
     return per_cpu(sched_res, cpu);
 }
@@ -636,18 +630,18 @@ a653sched_pick_resource(const struct scheduler *ops, struct sched_item *item)
  * @param new_ops   Pointer to this instance of the scheduler structure
  * @param cpu       The cpu that is changing scheduler
  * @param pdata     scheduler specific PCPU data (we don't have any)
- * @param vdata     scheduler specific VCPU data of the idle vcpu
+ * @param vdata     scheduler specific ITEM data of the idle item
  */
 static void
 a653_switch_sched(struct scheduler *new_ops, unsigned int cpu,
                   void *pdata, void *vdata)
 {
     struct sched_resource *sd = per_cpu(sched_res, cpu);
-    arinc653_vcpu_t *svc = vdata;
+    arinc653_item_t *svc = vdata;
 
-    ASSERT(!pdata && svc && is_idle_vcpu(svc->vc));
+    ASSERT(!pdata && svc && is_idle_item(svc->item));
 
-    idle_vcpu[cpu]->sched_item->priv = vdata;
+    sched_idle_item(cpu)->priv = vdata;
 
     per_cpu(scheduler, cpu) = new_ops;
     per_cpu(sched_res, cpu)->sched_priv = NULL; /* no pdata */
