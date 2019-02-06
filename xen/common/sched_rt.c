@@ -914,7 +914,7 @@ rt_item_insert(const struct scheduler *ops, struct sched_item *item)
     {
         replq_insert(ops, svc);
 
-        if ( !vc->is_running )
+        if ( !item->is_running )
             runq_insert(ops, svc);
     }
     item_schedule_unlock_irq(lock, item);

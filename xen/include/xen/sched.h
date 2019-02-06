@@ -270,7 +270,11 @@ struct sched_item {
 
     /* Last time when item has been scheduled out. */
     uint64_t               last_run_time;
+    /* Last time item got (de-)scheduled. */
+    uint64_t               state_entry_time;
 
+    /* Currently running on a CPU? */
+    bool                   is_running;
     /* Item needs affinity restored. */
     bool                   affinity_broken;
     /* Does soft affinity actually play a role (given hard affinity)? */
