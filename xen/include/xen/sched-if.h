@@ -55,29 +55,55 @@ static inline bool is_idle_item(const struct sched_item *item)
     return is_idle_vcpu(item->vcpu);
 }
 
+static inline unsigned int item_running(const struct sched_item *item)
+{
+    return item->runstate_cnt[RUNSTATE_running];
+}
+
 static inline bool item_runnable(const struct sched_item *item)
 {
-    return vcpu_runnable(item->vcpu);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        if ( vcpu_runnable(v) )
+            return true;
+
+    return false;
 }
 
 static inline bool item_runnable_state(const struct sched_item *item)
 {
     struct vcpu *v;
-    bool runnable;
+    bool runnable, ret = false;
 
-    v = item->vcpu;
-    runnable = vcpu_runnable(v);
+    for_each_sched_item_vcpu( item, v )
+    {
+        runnable = vcpu_runnable(v);
 
-    v->new_state = runnable ? RUNSTATE_running
-                            : (v->pause_flags & VPF_blocked)
-                              ? RUNSTATE_blocked : RUNSTATE_offline;
-    return runnable;
+        v->new_state = runnable ? RUNSTATE_running
+                                : (v->pause_flags & VPF_blocked)
+                                  ? RUNSTATE_blocked : RUNSTATE_offline;
+
+        if ( runnable )
+            ret = true;
+    }
+
+    return ret;
 }
 
 static inline void sched_set_res(struct sched_item *item,
                                  struct sched_resource *res)
 {
-    item->vcpu->processor = res->processor;
+    int cpu = cpumask_first(res->cpus);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+    {
+        ASSERT(cpu < nr_cpu_ids);
+        v->processor = cpu;
+        cpu = cpumask_next(cpu, res->cpus);
+    }
+
     item->res = res;
 }
 
@@ -89,25 +115,37 @@ static inline unsigned int sched_item_cpu(struct sched_item *item)
 static inline void sched_set_pause_flags(struct sched_item *item,
                                          unsigned int bit)
 {
-    __set_bit(bit, &item->vcpu->pause_flags);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        __set_bit(bit, &v->pause_flags);
 }
 
 static inline void sched_clear_pause_flags(struct sched_item *item,
                                            unsigned int bit)
 {
-    __clear_bit(bit, &item->vcpu->pause_flags);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        __clear_bit(bit, &v->pause_flags);
 }
 
 static inline void sched_set_pause_flags_atomic(struct sched_item *item,
                                                 unsigned int bit)
 {
-    set_bit(bit, &item->vcpu->pause_flags);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        set_bit(bit, &v->pause_flags);
 }
 
 static inline void sched_clear_pause_flags_atomic(struct sched_item *item,
                                                   unsigned int bit)
 {
-    clear_bit(bit, &item->vcpu->pause_flags);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        clear_bit(bit, &v->pause_flags);
 }
 
 static inline struct sched_item *sched_idle_item(unsigned int cpu)
@@ -468,12 +506,18 @@ static inline int sched_adjust_cpupool(const struct scheduler *s,
 
 static inline void sched_item_pause_nosync(struct sched_item *item)
 {
-    vcpu_pause_nosync(item->vcpu);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        vcpu_pause_nosync(v);
 }
 
 static inline void sched_item_unpause(struct sched_item *item)
 {
-    vcpu_unpause(item->vcpu);
+    struct vcpu *v;
+
+    for_each_sched_item_vcpu( item, v )
+        vcpu_unpause(v);
 }
 
 #define REGISTER_SCHEDULER(x) static const struct scheduler *x##_entry \
