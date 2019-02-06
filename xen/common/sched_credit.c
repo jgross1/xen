@@ -940,7 +940,8 @@ __csched_vcpu_acct_stop_locked(struct csched_private *prv,
 static void
 csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
 {
-    struct csched_item * const svc = CSCHED_ITEM(current->sched_item);
+    struct sched_item *curritem = current->sched_item;
+    struct csched_item * const svc = CSCHED_ITEM(curritem);
     const struct scheduler *ops = per_cpu(scheduler, cpu);
 
     ASSERT( current->processor == cpu );
@@ -976,7 +977,7 @@ csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
     {
         unsigned int new_cpu;
         unsigned long flags;
-        spinlock_t *lock = vcpu_schedule_lock_irqsave(current, &flags);
+        spinlock_t *lock = item_schedule_lock_irqsave(curritem, &flags);
 
         /*
          * If it's been active a while, check if we'd be better off
@@ -985,7 +986,7 @@ csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
          */
         new_cpu = _csched_cpu_pick(ops, current, 0);
 
-        vcpu_schedule_unlock_irqrestore(lock, flags, current);
+        item_schedule_unlock_irqrestore(lock, flags, curritem);
 
         if ( new_cpu != cpu )
         {
@@ -1037,19 +1038,19 @@ csched_item_insert(const struct scheduler *ops, struct sched_item *item)
     BUG_ON( is_idle_vcpu(vc) );
 
     /* csched_res_pick() looks in vc->processor's runq, so we need the lock. */
-    lock = vcpu_schedule_lock_irq(vc);
+    lock = item_schedule_lock_irq(item);
 
     item->res = csched_res_pick(ops, item);
     vc->processor = item->res->processor;
 
     spin_unlock_irq(lock);
 
-    lock = vcpu_schedule_lock_irq(vc);
+    lock = item_schedule_lock_irq(item);
 
     if ( !__vcpu_on_runq(svc) && vcpu_runnable(vc) && !vc->is_running )
         runq_insert(svc);
 
-    vcpu_schedule_unlock_irq(lock, vc);
+    item_schedule_unlock_irq(lock, item);
 
     SCHED_STAT_CRANK(vcpu_insert);
 }
@@ -2145,12 +2146,12 @@ csched_dump(const struct scheduler *ops)
             spinlock_t *lock;
 
             svc = list_entry(iter_svc, struct csched_item, active_vcpu_elem);
-            lock = vcpu_schedule_lock(svc->vcpu);
+            lock = item_schedule_lock(svc->vcpu->sched_item);
 
             printk("\t%3d: ", ++loop);
             csched_dump_vcpu(svc);
 
-            vcpu_schedule_unlock(lock, svc->vcpu);
+            item_schedule_unlock(lock, svc->vcpu->sched_item);
         }
     }
 
