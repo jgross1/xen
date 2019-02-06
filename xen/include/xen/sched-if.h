@@ -451,6 +451,16 @@ static inline int sched_adjust_cpupool(const struct scheduler *s,
         return 0;
 }
 
+static inline void sched_item_pause_nosync(struct sched_item *item)
+{
+    vcpu_pause_nosync(item->vcpu);
+}
+
+static inline void sched_item_unpause(struct sched_item *item)
+{
+    vcpu_unpause(item->vcpu);
+}
+
 #define REGISTER_SCHEDULER(x) static const struct scheduler *x##_entry \
   __used_section(".data.schedulers") = &x;
 
