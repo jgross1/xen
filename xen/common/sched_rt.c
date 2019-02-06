@@ -75,7 +75,7 @@
 /*
  * Locking:
  * A global system lock is used to protect the RunQ and DepletedQ.
- * The global lock is referenced by schedule_data.schedule_lock
+ * The global lock is referenced by sched_res->schedule_lock
  * from all physical cpus.
  *
  * The lock is already grabbed when calling wake/sleep/schedule/ functions
@@ -176,7 +176,7 @@ static void repl_timer_handler(void *data);
 
 /*
  * System-wide private data, include global RunQueue/DepletedQ
- * Global lock is referenced by schedule_data.schedule_lock from all
+ * Global lock is referenced by sched_res->schedule_lock from all
  * physical cpus. It can be grabbed via vcpu_schedule_lock_irq()
  */
 struct rt_private {
@@ -723,7 +723,7 @@ rt_init_pdata(const struct scheduler *ops, void *pdata, int cpu)
     }
 
     /* Move the scheduler lock to our global runqueue lock.  */
-    per_cpu(schedule_data, cpu).schedule_lock = &prv->lock;
+    per_cpu(sched_res, cpu)->schedule_lock = &prv->lock;
 
     /* _Not_ pcpu_schedule_unlock(): per_cpu().schedule_lock changed! */
     spin_unlock_irqrestore(old_lock, flags);
@@ -745,7 +745,7 @@ rt_switch_sched(struct scheduler *new_ops, unsigned int cpu,
      * another scheduler, but that is how things need to be, for
      * preventing races.
      */
-    ASSERT(per_cpu(schedule_data, cpu).schedule_lock != &prv->lock);
+    ASSERT(per_cpu(sched_res, cpu)->schedule_lock != &prv->lock);
 
     /*
      * If we are the absolute first cpu being switched toward this
@@ -763,7 +763,7 @@ rt_switch_sched(struct scheduler *new_ops, unsigned int cpu,
 
     idle_vcpu[cpu]->sched_item->priv = vdata;
     per_cpu(scheduler, cpu) = new_ops;
-    per_cpu(schedule_data, cpu).sched_priv = NULL; /* no pdata */
+    per_cpu(sched_res, cpu)->sched_priv = NULL; /* no pdata */
 
     /*
      * (Re?)route the lock to the per pCPU lock as /last/ thing. In fact,
@@ -771,7 +771,7 @@ rt_switch_sched(struct scheduler *new_ops, unsigned int cpu,
      * taking it, find all the initializations we've done above in place.
      */
     smp_mb();
-    per_cpu(schedule_data, cpu).schedule_lock = &prv->lock;
+    per_cpu(sched_res, cpu)->schedule_lock = &prv->lock;
 }
 
 static void

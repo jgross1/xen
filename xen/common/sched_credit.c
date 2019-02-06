@@ -82,7 +82,7 @@
 #define CSCHED_PRIV(_ops)   \
     ((struct csched_private *)((_ops)->sched_data))
 #define CSCHED_PCPU(_c)     \
-    ((struct csched_pcpu *)per_cpu(schedule_data, _c).sched_priv)
+    ((struct csched_pcpu *)per_cpu(sched_res, _c)->sched_priv)
 #define CSCHED_ITEM(item)   ((struct csched_item *) (item)->priv)
 #define CSCHED_DOM(_dom)    ((struct csched_dom *) (_dom)->sched_priv)
 #define RUNQ(_cpu)          (&(CSCHED_PCPU(_cpu)->runq))
@@ -248,7 +248,7 @@ static inline bool_t is_runq_idle(unsigned int cpu)
     /*
      * We're peeking at cpu's runq, we must hold the proper lock.
      */
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(per_cpu(sched_res, cpu)->schedule_lock));
 
     return list_empty(RUNQ(cpu)) ||
            is_idle_vcpu(__runq_elem(RUNQ(cpu)->next)->vcpu);
@@ -257,7 +257,7 @@ static inline bool_t is_runq_idle(unsigned int cpu)
 static inline void
 inc_nr_runnable(unsigned int cpu)
 {
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(per_cpu(sched_res, cpu)->schedule_lock));
     CSCHED_PCPU(cpu)->nr_runnable++;
 
 }
@@ -265,7 +265,7 @@ inc_nr_runnable(unsigned int cpu)
 static inline void
 dec_nr_runnable(unsigned int cpu)
 {
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(per_cpu(sched_res, cpu)->schedule_lock));
     ASSERT(CSCHED_PCPU(cpu)->nr_runnable >= 1);
     CSCHED_PCPU(cpu)->nr_runnable--;
 }
@@ -615,7 +615,7 @@ csched_init_pdata(const struct scheduler *ops, void *pdata, int cpu)
 {
     unsigned long flags;
     struct csched_private *prv = CSCHED_PRIV(ops);
-    struct schedule_data *sd = &per_cpu(schedule_data, cpu);
+    struct sched_resource *sd = per_cpu(sched_res, cpu);
 
     /*
      * This is called either during during boot, resume or hotplug, in
@@ -635,7 +635,7 @@ static void
 csched_switch_sched(struct scheduler *new_ops, unsigned int cpu,
                     void *pdata, void *vdata)
 {
-    struct schedule_data *sd = &per_cpu(schedule_data, cpu);
+    struct sched_resource *sd = per_cpu(sched_res, cpu);
     struct csched_private *prv = CSCHED_PRIV(new_ops);
     struct csched_item *svc = vdata;
 
@@ -654,7 +654,7 @@ csched_switch_sched(struct scheduler *new_ops, unsigned int cpu,
     spin_unlock(&prv->lock);
 
     per_cpu(scheduler, cpu) = new_ops;
-    per_cpu(schedule_data, cpu).sched_priv = pdata;
+    per_cpu(sched_res, cpu)->sched_priv = pdata;
 
     /*
      * (Re?)route the lock to the per pCPU lock as /last/ thing. In fact,

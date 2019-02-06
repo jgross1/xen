@@ -33,7 +33,7 @@ void update_last_cx_stat(struct acpi_processor_power *,
  */
 static inline int sched_has_urgent_vcpu(void)
 {
-    return atomic_read(&this_cpu(schedule_data).urgent_count);
+    return atomic_read(&this_cpu(sched_res)->urgent_count);
 }
 
 #endif /* __X86_ASM_CPUIDLE_H__ */
