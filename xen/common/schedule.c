@@ -63,6 +63,7 @@ static void poll_timer_fn(void *data);
 /* This is global for now so that private implementations can reach it */
 DEFINE_PER_CPU(struct schedule_data, schedule_data);
 DEFINE_PER_CPU(struct scheduler *, scheduler);
+DEFINE_PER_CPU(struct sched_resource *, sched_res);
 
 /* Scratch space for cpumasks. */
 DEFINE_PER_CPU(cpumask_t, cpumask_scratch);
@@ -305,6 +306,7 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     if ( (item = sched_alloc_item(v)) == NULL )
         return 1;
 
+    item->res = per_cpu(sched_res, processor);
     /* Initialise the per-vcpu timers. */
     init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
                v, v->processor);
@@ -419,6 +421,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
         sched_set_affinity(v, &cpumask_all, &cpumask_all);
 
         v->processor = new_p;
+	v->sched_item->res = per_cpu(sched_res, new_p);
         /*
          * With v->processor modified we must not
          * - make any further changes assuming we hold the scheduler lock,
@@ -787,9 +790,11 @@ void restore_vcpu_affinity(struct domain *d)
         }
 
         v->processor = cpumask_any(cpumask_scratch_cpu(cpu));
+        v->sched_item->res = per_cpu(sched_res, v->processor);
 
         lock = vcpu_schedule_lock_irq(v);
         v->processor = sched_pick_cpu(vcpu_scheduler(v), v->sched_item);
+        v->sched_item->res = per_cpu(sched_res, v->processor);
         spin_unlock_irq(lock);
 
         if ( old_cpu != v->processor )
@@ -1618,6 +1623,13 @@ static int cpu_schedule_up(unsigned int cpu)
 {
     struct schedule_data *sd = &per_cpu(schedule_data, cpu);
     void *sched_priv;
+    struct sched_resource *res;
+
+    res = xzalloc(struct sched_resource);
+    if ( res == NULL )
+        return -ENOMEM;
+    res->processor = cpu;
+    per_cpu(sched_res, cpu) = res;
 
     per_cpu(scheduler, cpu) = &ops;
     spin_lock_init(&sd->_lock);
@@ -1682,6 +1694,9 @@ static void cpu_schedule_down(unsigned int cpu)
     sd->sched_priv = NULL;
 
     kill_timer(&sd->s_timer);
+
+    xfree(per_cpu(sched_res, cpu));
+    per_cpu(sched_res, cpu) = NULL;
 }
 
 static int cpu_schedule_callback(

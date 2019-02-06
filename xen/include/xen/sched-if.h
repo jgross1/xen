@@ -44,9 +44,14 @@ struct schedule_data {
 
 #define curr_on_cpu(c)    (per_cpu(schedule_data, c).curr)
 
+struct sched_resource {
+    unsigned     processor;
+};
+
 DECLARE_PER_CPU(struct schedule_data, schedule_data);
 DECLARE_PER_CPU(struct scheduler *, scheduler);
 DECLARE_PER_CPU(struct cpupool *, cpupool);
+DECLARE_PER_CPU(struct sched_resource *, sched_res);
 
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
@@ -362,7 +367,10 @@ static inline void sched_migrate(const struct scheduler *s,
     if ( s->migrate )
         s->migrate(s, item, cpu);
     else
+    {
         item->vcpu->processor = cpu;
+        item->res = per_cpu(sched_res, cpu);
+    }
 }
 
 static inline int sched_pick_cpu(const struct scheduler *s,

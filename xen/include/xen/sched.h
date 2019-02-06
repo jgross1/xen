@@ -276,10 +276,13 @@ struct vcpu
     struct arch_vcpu arch;
 };
 
+struct sched_resource;
+
 struct sched_item {
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
     struct sched_item     *next_in_list;
+    struct sched_resource *res;
 };
 
 #define for_each_sched_item(d, e)                                         \
