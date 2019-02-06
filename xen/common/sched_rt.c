@@ -1138,7 +1138,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         }
         ret.time = snext->cur_budget; /* invoke the scheduler next time */
     }
-    ret.task = snext->vcpu;
+    ret.task = snext->vcpu->sched_item;
 
     return ret;
 }
