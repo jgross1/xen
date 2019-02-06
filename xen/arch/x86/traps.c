@@ -26,6 +26,7 @@
 
 #include <xen/init.h>
 #include <xen/sched.h>
+#include <xen/sched-if.h>
 #include <xen/lib.h>
 #include <xen/err.h>
 #include <xen/errno.h>
@@ -1594,16 +1595,17 @@ static void pci_serr_softirq(void)
 void async_exception_cleanup(struct vcpu *curr)
 {
     int trap;
+    struct sched_item *item = curr->sched_item;
 
     if ( !curr->async_exception_mask )
         return;
 
     /* Restore affinity.  */
-    if ( !cpumask_empty(curr->cpu_hard_affinity_tmp) &&
-         !cpumask_equal(curr->cpu_hard_affinity_tmp, curr->cpu_hard_affinity) )
+    if ( !cpumask_empty(item->cpu_hard_affinity_tmp) &&
+         !cpumask_equal(item->cpu_hard_affinity_tmp, item->cpu_hard_affinity) )
     {
-        vcpu_set_hard_affinity(curr, curr->cpu_hard_affinity_tmp);
-        cpumask_clear(curr->cpu_hard_affinity_tmp);
+        vcpu_set_hard_affinity(curr, item->cpu_hard_affinity_tmp);
+        cpumask_clear(item->cpu_hard_affinity_tmp);
     }
 
     if ( !(curr->async_exception_mask & (curr->async_exception_mask - 1)) )
