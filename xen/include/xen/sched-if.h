@@ -50,6 +50,7 @@ DECLARE_PER_CPU(struct cpupool *, cpupool);
 
 struct sched_item {
     struct vcpu           *vcpu;
+    void                  *priv;      /* scheduler private data */
 };
 
 /*

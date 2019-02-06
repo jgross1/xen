@@ -572,7 +572,7 @@ static inline struct csched2_pcpu *csched2_pcpu(unsigned int cpu)
 
 static inline struct csched2_vcpu *csched2_vcpu(const struct vcpu *v)
 {
-    return v->sched_priv;
+    return v->sched_item->priv;
 }
 
 static inline struct csched2_dom *csched2_dom(const struct domain *d)
@@ -970,7 +970,7 @@ _runq_assign(struct csched2_vcpu *svc, struct csched2_runqueue_data *rqd)
 static void
 runq_assign(const struct scheduler *ops, struct vcpu *vc)
 {
-    struct csched2_vcpu *svc = vc->sched_priv;
+    struct csched2_vcpu *svc = vc->sched_item->priv;
 
     ASSERT(svc->rqd == NULL);
 
@@ -997,7 +997,7 @@ _runq_deassign(struct csched2_vcpu *svc)
 static void
 runq_deassign(const struct scheduler *ops, struct vcpu *vc)
 {
-    struct csched2_vcpu *svc = vc->sched_priv;
+    struct csched2_vcpu *svc = vc->sched_item->priv;
 
     ASSERT(svc->rqd == c2rqd(ops, vc->processor));
 
@@ -3108,7 +3108,7 @@ static void
 csched2_item_insert(const struct scheduler *ops, struct sched_item *item)
 {
     struct vcpu *vc = item->vcpu;
-    struct csched2_vcpu *svc = vc->sched_priv;
+    struct csched2_vcpu *svc = item->priv;
     struct csched2_dom * const sdom = svc->sdom;
     spinlock_t *lock;
 
@@ -3888,7 +3888,7 @@ csched2_switch_sched(struct scheduler *new_ops, unsigned int cpu,
     ASSERT(!local_irq_is_enabled());
     write_lock(&prv->lock);
 
-    idle_vcpu[cpu]->sched_priv = vdata;
+    idle_vcpu[cpu]->sched_item->priv = vdata;
 
     rqi = init_pdata(prv, pdata, cpu);
 
