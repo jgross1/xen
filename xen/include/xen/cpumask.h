@@ -75,6 +75,8 @@
 
 typedef struct cpumask{ DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 
+extern const cpumask_t cpumask_all;
+
 extern unsigned int nr_cpu_ids;
 
 #if NR_CPUS > 4 * BITS_PER_LONG
