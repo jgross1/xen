@@ -193,8 +193,8 @@ struct scheduler {
     struct task_slice (*do_schedule) (const struct scheduler *, s_time_t,
                                       bool_t tasklet_work_scheduled);
 
-    int          (*pick_cpu)       (const struct scheduler *,
-                                    struct sched_item *);
+    struct sched_resource * (*pick_resource) (const struct scheduler *,
+                                              struct sched_item *);
     void         (*migrate)        (const struct scheduler *,
                                     struct sched_item *, unsigned int);
     int          (*adjust)         (const struct scheduler *, struct domain *,

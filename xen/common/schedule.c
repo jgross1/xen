@@ -697,7 +697,8 @@ static void vcpu_migrate_finish(struct vcpu *v)
                 break;
 
             /* Select a new CPU. */
-            new_cpu = SCHED_OP(vcpu_scheduler(v), pick_cpu, v->sched_item);
+            new_cpu = SCHED_OP(vcpu_scheduler(v), pick_resource,
+                               v->sched_item)->processor;
             if ( (new_lock == per_cpu(schedule_data, new_cpu).schedule_lock) &&
                  cpumask_test_cpu(new_cpu, v->domain->cpupool->cpu_valid) )
                 break;
@@ -803,8 +804,9 @@ void restore_vcpu_affinity(struct domain *d)
         v->sched_item->res = per_cpu(sched_res, v->processor);
 
         lock = vcpu_schedule_lock_irq(v);
-        v->processor = SCHED_OP(vcpu_scheduler(v), pick_cpu, v->sched_item);
-        v->sched_item->res = per_cpu(sched_res, v->processor);
+        v->sched_item->res = SCHED_OP(vcpu_scheduler(v), pick_resource,
+                                      v->sched_item);
+        v->processor = v->sched_item->res->processor;
         spin_unlock_irq(lock);
 
         if ( old_cpu != v->processor )
