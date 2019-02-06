@@ -141,6 +141,11 @@ static inline bool vcpu_running(struct vcpu *v)
     return v->sched_item->is_running;
 }
 
+static inline unsigned int sched_get_resource_cpu(unsigned int cpu)
+{
+    return per_cpu(sched_res, cpu)->processor;
+}
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:
