@@ -3636,9 +3636,9 @@ csched2_schedule(
      * Return task to run next...
      */
     ret.time = csched2_runtime(ops, cpu, snext, now);
-    ret.task = snext->vcpu;
+    ret.task = snext->vcpu->sched_item;
 
-    CSCHED2_VCPU_CHECK(ret.task);
+    CSCHED2_VCPU_CHECK(ret.task->vcpu);
     return ret;
 }
 
