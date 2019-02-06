@@ -1062,16 +1062,16 @@ runq_pick(const struct scheduler *ops, const cpumask_t *mask)
  * schedule function for rt scheduler.
  * The lock is already grabbed in schedule.c, no need to lock here
  */
-static struct task_slice
-rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_scheduled)
+static void
+rt_schedule(const struct scheduler *ops, struct sched_item *curritem,
+            s_time_t now, bool tasklet_work_scheduled)
 {
     const unsigned int cpu = smp_processor_id();
     const unsigned int sched_cpu = sched_get_resource_cpu(cpu);
     struct rt_private *prv = rt_priv(ops);
-    struct rt_item *const scurr = rt_item(current->sched_item);
+    struct rt_item *const scurr = rt_item(curritem);
     struct rt_item *snext = NULL;
-    struct task_slice ret = { .migrated = 0 };
-    struct sched_item *curritem = current->sched_item;
+    bool migrated = false;
 
     /* TRACE */
     {
@@ -1119,7 +1119,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         __set_bit(__RTDS_delayed_runq_add, &scurr->flags);
 
     snext->last_start = now;
-    ret.time =  -1; /* if an idle item is picked */
+    curritem->next_time =  -1; /* if an idle item is picked */
     if ( !is_idle_item(snext->item) )
     {
         if ( snext != scurr )
@@ -1130,13 +1130,13 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         if ( sched_item_cpu(snext->item) != sched_cpu )
         {
             sched_set_res(snext->item, per_cpu(sched_res, sched_cpu));
-            ret.migrated = 1;
+            migrated = true;
         }
-        ret.time = snext->cur_budget; /* invoke the scheduler next time */
+        /* Invoke the scheduler next time. */
+        curritem->next_time = snext->cur_budget;
     }
-    ret.task = snext->item;
-
-    return ret;
+    curritem->next_task = snext->item;
+    snext->item->migrated = migrated;
 }
 
 /*
