@@ -614,6 +614,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
     case XEN_DOMCTL_getvcpuaffinity:
     {
         struct vcpu *v;
+        struct sched_item *item;
         struct xen_domctl_vcpuaffinity *vcpuaff = &op->u.vcpuaffinity;
 
         ret = -EINVAL;
@@ -624,6 +625,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
         if ( (v = d->vcpu[vcpuaff->vcpu]) == NULL )
             break;
 
+        item = v->sched_item;
         ret = -EINVAL;
         if ( vcpuaffinity_params_invalid(vcpuaff) )
             break;
@@ -643,7 +645,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
                 ret = -ENOMEM;
                 break;
             }
-            cpumask_copy(old_affinity, v->cpu_hard_affinity);
+            cpumask_copy(old_affinity, item->cpu_hard_affinity);
 
             if ( !alloc_cpumask_var(&new_affinity) )
             {
@@ -676,7 +678,7 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
                  * For hard affinity, what we return is the intersection of
                  * cpupool's online mask and the new hard affinity.
                  */
-                cpumask_and(new_affinity, online, v->cpu_hard_affinity);
+                cpumask_and(new_affinity, online, item->cpu_hard_affinity);
                 ret = cpumask_to_xenctl_bitmap(&vcpuaff->cpumap_hard,
                                                new_affinity);
             }
@@ -705,7 +707,8 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
                  * hard affinity.
                  */
                 cpumask_and(new_affinity, new_affinity, online);
-                cpumask_and(new_affinity, new_affinity, v->cpu_hard_affinity);
+                cpumask_and(new_affinity, new_affinity,
+                            item->cpu_hard_affinity);
                 ret = cpumask_to_xenctl_bitmap(&vcpuaff->cpumap_soft,
                                                new_affinity);
             }
@@ -718,10 +721,10 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
         {
             if ( vcpuaff->flags & XEN_VCPUAFFINITY_HARD )
                 ret = cpumask_to_xenctl_bitmap(&vcpuaff->cpumap_hard,
-                                               v->cpu_hard_affinity);
+                                               item->cpu_hard_affinity);
             if ( vcpuaff->flags & XEN_VCPUAFFINITY_SOFT )
                 ret = cpumask_to_xenctl_bitmap(&vcpuaff->cpumap_soft,
-                                               v->cpu_soft_affinity);
+                                               item->cpu_soft_affinity);
         }
         break;
     }
