@@ -1701,6 +1701,8 @@ void __init noreturn __start_xen(unsigned long mbi_p)
         printk(XENLOG_INFO "Parked %u CPUs\n", num_parked);
     smp_cpus_done();
 
+    scheduler_smp_init();
+
     do_initcalls();
 
     if ( opt_watchdog ) 
