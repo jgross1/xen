@@ -367,6 +367,7 @@ static void vlapic_accept_irq(struct vcpu *v, uint32_t icr_low)
             domain_lock(v->domain);
             if ( v->is_initialised )
                 wake = test_and_clear_bit(_VPF_down, &v->pause_flags);
+            v->reload_context = wake;
             domain_unlock(v->domain);
             if ( wake )
                 vcpu_wake(v);
