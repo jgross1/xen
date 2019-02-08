@@ -55,9 +55,32 @@ boolean_param("sched_smt_power_savings", sched_smt_power_savings);
 int sched_ratelimit_us = SCHED_DEFAULT_RATELIMIT_US;
 integer_param("sched_ratelimit_us", sched_ratelimit_us);
 
+static enum {
+    SCHED_GRAN_cpu,
+    SCHED_GRAN_core,
+    SCHED_GRAN_socket
+} opt_sched_granularity = SCHED_GRAN_cpu;
+
+#ifdef CONFIG_X86
+static int __init sched_select_granularity(const char *str)
+{
+    if (strcmp("cpu", str) == 0)
+        opt_sched_granularity = SCHED_GRAN_cpu;
+    else if (strcmp("core", str) == 0)
+        opt_sched_granularity = SCHED_GRAN_core;
+    else if (strcmp("socket", str) == 0)
+        opt_sched_granularity = SCHED_GRAN_socket;
+    else
+        return -EINVAL;
+
+    return 0;
+}
+custom_param("sched-gran", sched_select_granularity);
+#endif
+
 /* Number of vcpus per struct sched_item. */
 static unsigned int sched_granularity = 1;
-const cpumask_t *sched_res_mask = &cpumask_all;
+cpumask_var_t sched_res_mask;
 
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
@@ -322,6 +345,8 @@ static void sched_free_item(struct sched_item *item, struct vcpu *v)
 
     if ( item->vcpu == v )
         item->vcpu = v->next_in_list;
+
+    item->runstate_cnt[v->runstate.state]--;
 
     if ( !cnt )
         sched_free_item_mem(item);
@@ -2113,8 +2138,14 @@ static int cpu_schedule_up(unsigned int cpu)
     sd = xzalloc(struct sched_resource);
     if ( sd == NULL )
         return -ENOMEM;
+    if ( !zalloc_cpumask_var(&sd->cpus) )
+    {
+        xfree(sd);
+        return -ENOMEM;
+    }
+
     sd->processor = cpu;
-    sd->cpus = cpumask_of(cpu);
+    cpumask_copy(sd->cpus, cpumask_of(cpu));
     per_cpu(sched_res, cpu) = sd;
 
     per_cpu(scheduler, cpu) = &ops;
@@ -2170,30 +2201,92 @@ static int cpu_schedule_up(unsigned int cpu)
     return 0;
 }
 
+static void sched_free_sched_res(struct sched_resource *sd)
+{
+    kill_timer(&sd->s_timer);
+    free_cpumask_var(sd->cpus);
+
+    xfree(sd);
+}
+
 static void cpu_schedule_down(unsigned int cpu)
 {
     struct sched_resource *sd = per_cpu(sched_res, cpu);
     struct scheduler *sched = per_cpu(scheduler, cpu);
+
+    cpumask_clear_cpu(cpu, sd->cpus);
+    per_cpu(sched_res, cpu) = NULL;
+
+    if ( cpumask_weight(sd->cpus) )
+        return;
 
     sched_free_pdata(sched, sd->sched_priv, cpu);
     sched_free_vdata(sched, idle_vcpu[cpu]->sched_item->priv);
 
     idle_vcpu[cpu]->sched_item->priv = NULL;
     sd->sched_priv = NULL;
+    cpumask_clear_cpu(cpu, sched_res_mask);
 
-    kill_timer(&sd->s_timer);
-
-    xfree(per_cpu(sched_res, cpu));
-    per_cpu(sched_res, cpu) = NULL;
+    sched_free_sched_res(sd);
 }
 
 void scheduler_percpu_init(unsigned int cpu)
 {
     struct scheduler *sched = per_cpu(scheduler, cpu);
     struct sched_resource *sd = per_cpu(sched_res, cpu);
+    const cpumask_t *mask;
+    unsigned int master_cpu;
+    spinlock_t *lock;
+    struct sched_item *old_item, *master_item;
 
-    if ( system_state != SYS_STATE_resume )
+    if ( system_state == SYS_STATE_resume )
+        return;
+
+    switch ( opt_sched_granularity )
+    {
+    case SCHED_GRAN_cpu:
+        mask = cpumask_of(cpu);
+        break;
+    case SCHED_GRAN_core:
+        mask = per_cpu(cpu_sibling_mask, cpu);
+        break;
+    case SCHED_GRAN_socket:
+        mask = per_cpu(cpu_core_mask, cpu);
+        break;
+    default:
+        ASSERT_UNREACHABLE();
+        return;
+    }
+
+    if ( cpu == 0 || cpumask_weight(mask) == 1 )
+    {
+        cpumask_set_cpu(cpu, sched_res_mask);
         sched_init_pdata(sched, sd->sched_priv, cpu);
+        return;
+    }
+
+    master_cpu = cpumask_first(mask);
+    master_item = idle_vcpu[master_cpu]->sched_item;
+    lock = pcpu_schedule_lock(master_cpu);
+
+    /* Merge idle_vcpu item and sched_resource into master cpu. */
+    old_item = idle_vcpu[cpu]->sched_item;
+    idle_vcpu[cpu]->sched_item = master_item;
+    per_cpu(sched_res, cpu) = per_cpu(sched_res, master_cpu);
+    per_cpu(sched_res_idx, cpu) = cpumask_weight(per_cpu(sched_res, cpu)->cpus);
+    cpumask_set_cpu(cpu, per_cpu(sched_res, cpu)->cpus);
+    master_item->runstate_cnt[RUNSTATE_running] +=
+            old_item->runstate_cnt[RUNSTATE_running];
+    master_item->runstate_cnt[RUNSTATE_runnable] +=
+            old_item->runstate_cnt[RUNSTATE_runnable];
+
+    pcpu_schedule_unlock(lock, master_cpu);
+
+    sched_free_pdata(sched, sd->sched_priv, cpu);
+    sched_free_vdata(sched, old_item->priv);
+
+    sched_free_sched_res(sd);
+    sched_free_item_mem(old_item);
 }
 
 static int cpu_schedule_callback(
@@ -2273,6 +2366,51 @@ static struct notifier_block cpu_schedule_nfb = {
     .notifier_call = cpu_schedule_callback
 };
 
+static unsigned int __init sched_check_granularity(void)
+{
+    unsigned int cpu;
+    unsigned int siblings, gran = 0;
+
+    for_each_online_cpu( cpu )
+    {
+        switch ( opt_sched_granularity )
+        {
+        case SCHED_GRAN_cpu:
+            /* If granularity is "thread" we are fine already. */
+            return 1;
+        case SCHED_GRAN_core:
+            siblings = cpumask_weight(per_cpu(cpu_sibling_mask, cpu));
+            break;
+        case SCHED_GRAN_socket:
+            siblings = cpumask_weight(per_cpu(cpu_core_mask, cpu));
+            break;
+        default:
+            ASSERT_UNREACHABLE();
+            return 0;
+        }
+
+        if ( gran == 0 )
+            gran = siblings;
+        else if ( gran != siblings )
+            return 0;
+    }
+
+    return gran;
+}
+
+/* Setup data for selected scheduler granularity. */
+void __init scheduler_smp_init(void)
+{
+    unsigned int gran;
+
+    gran = sched_check_granularity();
+    if ( gran == 0 )
+        panic("Illegal cpu configuration for scheduling granularity!\n"
+              "Please use thread scheduling.\n");
+
+    sched_granularity = gran;
+}
+
 /* Initialise the data structures. */
 void __init scheduler_init(void)
 {
@@ -2303,6 +2441,9 @@ void __init scheduler_init(void)
         BUG_ON(!ops.name);
         printk("Using '%s' (%s)\n", ops.name, ops.opt_name);
     }
+
+    if ( !zalloc_cpumask_var(&sched_res_mask) )
+        BUG();
 
     if ( cpu_schedule_up(0) )
         BUG();

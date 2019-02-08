@@ -23,7 +23,7 @@ extern cpumask_t cpupool_free_cpus;
 extern int sched_ratelimit_us;
 
 /* Scheduling resource mask. */
-extern const cpumask_t *sched_res_mask;
+extern cpumask_var_t sched_res_mask;
 
 /*
  * In order to allow a scheduler to remap the lock->cpu mapping,
@@ -45,7 +45,7 @@ struct sched_resource {
     struct timer        s_timer;        /* scheduling timer                */
     atomic_t            urgent_count;   /* how many urgent vcpus           */
     unsigned            processor;
-    const cpumask_t    *cpus;           /* cpus covered by this struct     */
+    cpumask_var_t       cpus;           /* cpus covered by this struct     */
 };
 
 #define curr_on_cpu(c)    (per_cpu(sched_res, c)->curr)

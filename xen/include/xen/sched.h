@@ -681,6 +681,7 @@ void noreturn asm_domain_crash_synchronous(unsigned long addr);
 
 void scheduler_init(void);
 void scheduler_percpu_init(unsigned int cpu);
+void scheduler_smp_init(void);
 int  sched_init_vcpu(struct vcpu *v);
 void sched_destroy_vcpu(struct vcpu *v);
 int  sched_init_domain(struct domain *d, int poolid);
