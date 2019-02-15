@@ -592,6 +592,7 @@ static void acpi_processor_idle(void)
         {
             struct cpu_info *info = get_cpu_info();
 
+            debugtrace_printk("acpi idle enter cpu %d\n", smp_processor_id());
             spec_ctrl_enter_idle(info);
             safe_halt();
             spec_ctrl_exit_idle(info);

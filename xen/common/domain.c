@@ -1382,7 +1382,10 @@ long do_vcpu_op(int cmd, unsigned int vcpuid, XEN_GUEST_HANDLE_PARAM(void) arg)
             else
                 wake = test_and_clear_bit(_VPF_down, &v->pause_flags);
             if ( wake )
+            {
                 v->reload_context = wake;
+                debugtrace_printk("%pv online (up)\n", v);
+            }
             domain_unlock(d);
             if ( wake )
                 vcpu_wake(v);

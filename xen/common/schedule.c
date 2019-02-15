@@ -1796,6 +1796,8 @@ static void schedule(void)
     {
         next = prev->next_task;
         vnext = sched_item2vcpu_cpu(next, cpu);
+        debugtrace_printk("schedule() slave %pv->%pv on cpu %d\n",
+                          vprev, vnext, cpu);
         sched_wait_rendezvous_in(prev, lock, cpu, now);
     }
     else
@@ -1819,6 +1821,7 @@ static void schedule(void)
                      next->domain->domain_id, next->item_id,
                      now - vprev->runstate.state_entry_time,
                      prev->next_time);
+            debugtrace_printk("schedule() cont %pv on cpu %d\n", vprev, cpu);
             trace_continue_running(vnext);
             return continue_running(vprev);
         }
@@ -1827,6 +1830,8 @@ static void schedule(void)
         {
             cpumask_t mask;
 
+            debugtrace_printk("schedule() master %pv->%pv on cpu %d\n",
+                              vprev, vnext, cpu);
             prev->rendezvous_in_cnt = sched_granularity;
             cpumask_andnot(&mask, sd->cpus, cpumask_of(cpu));
             cpumask_raise_softirq(&mask, SCHEDULE_SOFTIRQ);

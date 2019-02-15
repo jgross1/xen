@@ -642,6 +642,7 @@ void irq_move_cleanup_interrupt(struct cpu_user_regs *regs)
     ack_APIC_irq();
 
     me = smp_processor_id();
+    debugtrace_printk("irq_move_cleanup_interrupt cpu %d\n", me);
     for ( vector = FIRST_DYNAMIC_VECTOR;
           vector <= LAST_HIPRIORITY_VECTOR; vector++)
     {

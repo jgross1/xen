@@ -740,6 +740,7 @@ static void mwait_idle(void)
 		{
 			struct cpu_info *info = get_cpu_info();
 
+			debugtrace_printk("mwait idle enter cpu %d\n", cpu);
 			spec_ctrl_enter_idle(info);
 			safe_halt();
 			spec_ctrl_exit_idle(info);

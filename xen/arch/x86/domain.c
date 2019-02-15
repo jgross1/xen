@@ -85,6 +85,7 @@ static void default_idle(void)
     local_irq_disable();
     if ( cpu_is_haltable(smp_processor_id()) )
     {
+        debugtrace_printk("default idle enter cpu %d\n", smp_processor_id());
         spec_ctrl_enter_idle(info);
         safe_halt();
         spec_ctrl_exit_idle(info);
@@ -1208,6 +1209,7 @@ int arch_set_info_guest(
         update_domain_wallclock_time(d);
 
     /* Don't redo final setup */
+    debugtrace_printk("%pv initialized\n", v);
     v->is_initialised = 1;
 
     if ( paging_mode_enabled(d) )
@@ -1221,6 +1223,7 @@ int arch_set_info_guest(
     {
         v->reload_context = true;
         clear_bit(_VPF_down, &v->pause_flags);
+        debugtrace_printk("%pv online\n", v);
     }
     else
         set_bit(_VPF_down, &v->pause_flags);
@@ -1842,6 +1845,7 @@ static void __continue_running(struct vcpu *same)
         if ( is_pv_domain(d) )
             load_segments(same);
 
+        debugtrace_printk("context of %pv reloaded on cpu %d\n", same, cpu);
         same->reload_context = false;
 
         _update_runstate_area(same);
@@ -1915,6 +1919,8 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
         if ( is_pv_domain(nextd) )
             load_segments(next);
 
+        if ( next->reload_context )
+            debugtrace_printk("context of %pv reloaded on cpu %d\n", next, cpu);
         next->reload_context = false;
 
         ctxt_switch_levelling(next);
@@ -2028,6 +2034,7 @@ void sync_local_execstate(void)
 
 void sync_vcpu_execstate(struct vcpu *v)
 {
+    debugtrace_printk("sync execstate for %pv on cpu %d\n", v, smp_processor_id());
     if ( v->dirty_cpu == smp_processor_id() )
         sync_local_execstate();
     else if ( vcpu_cpu_dirty(v) )
