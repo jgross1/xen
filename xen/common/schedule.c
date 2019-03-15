@@ -1775,17 +1775,22 @@ static struct sched_item *sched_wait_rendezvous_in(struct sched_item *prev,
     {
         next = do_schedule(prev, now);
         atomic_set(&next->rendezvous_out_cnt, sched_granularity + 1);
-        return next;
     }
-
-    while ( prev->rendezvous_in_cnt )
+    else
     {
-        pcpu_schedule_unlock_irq(lock, cpu);
-        cpu_relax();
-        pcpu_schedule_lock_irq(cpu);
+        while ( prev->rendezvous_in_cnt )
+        {
+            pcpu_schedule_unlock_irq(lock, cpu);
+            cpu_relax();
+            pcpu_schedule_lock_irq(cpu);
+        }
+        next = prev->next_task;
     }
 
-    return prev->next_task;
+    if ( unlikely(prev == next) )
+        vcpu_runstate_helper(current, RUNSTATE_running, now);
+
+    return next;
 }
 
 static void sched_context_switch(struct vcpu *vprev, struct vcpu *vnext,

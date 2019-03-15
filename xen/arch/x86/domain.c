@@ -1171,7 +1171,10 @@ int arch_set_info_guest(
 
  out:
     if ( flags & VGCF_online )
+    {
+        v->reload_context = true;
         clear_bit(_VPF_down, &v->pause_flags);
+    }
     else
         set_bit(_VPF_down, &v->pause_flags);
     return 0;
@@ -1663,6 +1666,24 @@ static inline void load_default_gdt(seg_desc_t *gdt, unsigned int cpu)
     per_cpu(full_gdt_loaded, cpu) = false;
 }
 
+static void inline csw_load_regs(struct vcpu *v,
+                                 struct cpu_user_regs *stack_regs)
+{
+    memcpy(stack_regs, &v->arch.user_regs, CTXT_SWITCH_STACK_BYTES);
+    if ( cpu_has_xsave )
+    {
+        u64 xcr0 = v->arch.xcr0 ?: XSTATE_FP_SSE;
+
+        if ( xcr0 != get_xcr0() && !set_xcr0(xcr0) )
+            BUG();
+
+        if ( cpu_has_xsaves && is_hvm_vcpu(v) )
+            set_msr_xss(v->arch.hvm.msr_xss);
+    }
+    vcpu_restore_fpu_nonlazy(v, false);
+    v->domain->arch.ctxt_switch->to(v);
+}
+
 static void __context_switch(void)
 {
     struct cpu_user_regs *stack_regs = guest_cpu_user_regs();
@@ -1676,7 +1697,7 @@ static void __context_switch(void)
     ASSERT(p != n);
     ASSERT(!vcpu_cpu_dirty(n));
 
-    if ( !is_idle_domain(pd) )
+    if ( !is_idle_domain(pd) && is_vcpu_online(p) && !p->reload_context )
     {
         memcpy(&p->arch.user_regs, stack_regs, CTXT_SWITCH_STACK_BYTES);
         vcpu_save_fpu(p);
@@ -1692,22 +1713,8 @@ static void __context_switch(void)
         cpumask_set_cpu(cpu, nd->dirty_cpumask);
     write_atomic(&n->dirty_cpu, cpu);
 
-    if ( !is_idle_domain(nd) )
-    {
-        memcpy(stack_regs, &n->arch.user_regs, CTXT_SWITCH_STACK_BYTES);
-        if ( cpu_has_xsave )
-        {
-            u64 xcr0 = n->arch.xcr0 ?: XSTATE_FP_SSE;
-
-            if ( xcr0 != get_xcr0() && !set_xcr0(xcr0) )
-                BUG();
-
-            if ( cpu_has_xsaves && is_hvm_vcpu(n) )
-                set_msr_xss(n->arch.hvm.msr_xss);
-        }
-        vcpu_restore_fpu_nonlazy(n, false);
-        nd->arch.ctxt_switch->to(n);
-    }
+    if ( !is_idle_domain(nd) && is_vcpu_online(n) )
+        csw_load_regs(n, stack_regs);
 
     psr_ctxt_switch_to(nd);
 
@@ -1775,6 +1782,72 @@ static void context_wait_rendezvous_out(struct sched_item *item,
         context_saved(prev);
 }
 
+static void __continue_running(struct vcpu *same)
+{
+    struct domain *d = same->domain;
+    seg_desc_t *gdt;
+    bool full_gdt = need_full_gdt(d);
+    unsigned int cpu = smp_processor_id();
+
+    gdt = !is_pv_32bit_domain(d) ? per_cpu(gdt_table, cpu) :
+                                   per_cpu(compat_gdt_table, cpu);
+
+    if ( same->reload_context )
+    {
+        struct cpu_user_regs *stack_regs = guest_cpu_user_regs();
+
+        get_cpu_info()->use_pv_cr3 = false;
+        get_cpu_info()->xen_cr3 = 0;
+
+        local_irq_disable();
+
+        csw_load_regs(same, stack_regs);
+
+        psr_ctxt_switch_to(d);
+
+        if ( full_gdt )
+            write_full_gdt_ptes(gdt, same);
+
+        write_ptbase(same);
+
+#if defined(CONFIG_PV) && defined(CONFIG_HVM)
+        /* Prefetch the VMCB if we expect to use it later in context switch */
+        if ( cpu_has_svm && is_pv_domain(d) && !is_pv_32bit_domain(d) &&
+             !(read_cr4() & X86_CR4_FSGSBASE) )
+            svm_load_segs(0, 0, 0, 0, 0, 0, 0);
+#endif
+
+        if ( full_gdt )
+            load_full_gdt(same, cpu);
+
+        local_irq_enable();
+
+        if ( is_pv_domain(d) )
+            load_segments(same);
+
+        same->reload_context = false;
+
+        _update_runstate_area(same);
+
+        update_vcpu_system_time(same);
+    }
+    else if ( !is_idle_vcpu(same) && full_gdt != per_cpu(full_gdt_loaded, cpu) )
+    {
+        local_irq_disable();
+
+        if ( full_gdt )
+        {
+            write_full_gdt_ptes(gdt, same);
+            write_ptbase(same);
+            load_full_gdt(same, cpu);
+        }
+        else
+            load_default_gdt(gdt, cpu);
+
+        local_irq_enable();
+    }
+}
+
 void context_switch(struct vcpu *prev, struct vcpu *next)
 {
     unsigned int cpu = smp_processor_id();
@@ -1811,6 +1884,9 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
          (is_idle_domain(nextd) && cpu_online(cpu)) )
     {
         local_irq_enable();
+
+        if ( !is_idle_domain(nextd) )
+            __continue_running(next);
     }
     else
     {
@@ -1821,6 +1897,8 @@ void context_switch(struct vcpu *prev, struct vcpu *next)
 
         if ( is_pv_domain(nextd) )
             load_segments(next);
+
+        next->reload_context = false;
 
         ctxt_switch_levelling(next);
 
@@ -1885,6 +1963,8 @@ void continue_running(struct vcpu *same)
 
     if ( !vcpu_runnable(same) )
         sched_vcpu_idle(same);
+
+    __continue_running(same);
 
     /* See the comment above. */
     same->domain->arch.ctxt_switch->tail(same);

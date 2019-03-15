@@ -206,6 +206,9 @@ struct vcpu
     bool             hcall_compat;
 #endif
 
+    /* VCPU was down before (context might need to be reloaded). */
+    bool             reload_context;
+
     /* The CPU, if any, which is holding onto this VCPU's state. */
 #define VCPU_CPU_CLEAN (~0u)
     unsigned int     dirty_cpu;
