@@ -705,16 +705,19 @@ void vcpu_wake(struct vcpu *v)
 {
     unsigned long flags;
     spinlock_t *lock;
+    struct sched_item *item = v->sched_item;
 
     TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
 
-    lock = item_schedule_lock_irqsave(v->sched_item, &flags);
+    lock = item_schedule_lock_irqsave(item, &flags);
 
     if ( likely(vcpu_runnable(v)) )
     {
         if ( v->runstate.state >= RUNSTATE_blocked )
             vcpu_runstate_change(v, RUNSTATE_runnable, NOW());
-        SCHED_OP(vcpu_scheduler(v), wake, v->sched_item);
+        SCHED_OP(vcpu_scheduler(v), wake, item);
+        if ( item->is_running && v->runstate.state != RUNSTATE_running )
+            cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
     }
     else if ( !(v->pause_flags & VPF_blocked) )
     {
@@ -722,7 +725,7 @@ void vcpu_wake(struct vcpu *v)
             vcpu_runstate_change(v, RUNSTATE_offline, NOW());
     }
 
-    item_schedule_unlock_irqrestore(lock, flags, v->sched_item);
+    item_schedule_unlock_irqrestore(lock, flags, item);
 }
 
 void vcpu_unblock(struct vcpu *v)
