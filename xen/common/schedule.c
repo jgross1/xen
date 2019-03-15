@@ -2029,6 +2029,15 @@ static void cpu_schedule_down(unsigned int cpu)
     per_cpu(sched_res, cpu) = NULL;
 }
 
+void scheduler_percpu_init(unsigned int cpu)
+{
+    struct scheduler *sched = per_cpu(scheduler, cpu);
+    struct sched_resource *sd = per_cpu(sched_res, cpu);
+
+    if ( system_state != SYS_STATE_resume )
+        SCHED_OP(sched, init_pdata, sd->sched_priv, cpu);
+}
+
 static int cpu_schedule_callback(
     struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
@@ -2047,8 +2056,8 @@ static int cpu_schedule_callback(
      * data can avoid implementing alloc_pdata. init_pdata may, however, be
      * necessary/useful in this case too (e.g., it can contain the "register
      * the pCPU to the scheduler" part). alloc_pdata (if present) is called
-     * during CPU_UP_PREPARE. init_pdata (if present) is called during
-     * CPU_STARTING.
+     * during CPU_UP_PREPARE. init_pdata (if present) is called before
+     * CPU_STARTING in scheduler_percpu_init().
      *
      * On the other hand, at teardown, we need to reverse what has been done
      * during initialization, and then free the per-pCPU specific data. This
@@ -2071,10 +2080,6 @@ static int cpu_schedule_callback(
      */
     switch ( action )
     {
-    case CPU_STARTING:
-        if ( system_state != SYS_STATE_resume )
-            SCHED_OP(sched, init_pdata, sd->sched_priv, cpu);
-        break;
     case CPU_UP_PREPARE:
         if ( system_state != SYS_STATE_resume )
             rc = cpu_schedule_up(cpu);
@@ -2171,7 +2176,7 @@ void __init scheduler_init(void)
     this_cpu(sched_res)->curr = idle_vcpu[0]->sched_item;
     this_cpu(sched_res)->sched_priv = SCHED_OP(&ops, alloc_pdata, 0);
     BUG_ON(IS_ERR(this_cpu(sched_res)->sched_priv));
-    SCHED_OP(&ops, init_pdata, this_cpu(sched_res)->sched_priv, 0);
+    scheduler_percpu_init(0);
 }
 
 /*
