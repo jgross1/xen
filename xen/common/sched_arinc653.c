@@ -557,7 +557,7 @@ a653sched_do_schedule(
     if ( !((new_task != NULL)
            && (AITEM(new_task) != NULL)
            && AITEM(new_task)->awake
-           && item_runnable(new_task)) )
+           && item_runnable_state(new_task)) )
         new_task = IDLETASK(cpu);
     BUG_ON(new_task == NULL);
 

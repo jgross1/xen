@@ -60,6 +60,20 @@ static inline bool item_runnable(const struct sched_item *item)
     return vcpu_runnable(item->vcpu);
 }
 
+static inline bool item_runnable_state(const struct sched_item *item)
+{
+    struct vcpu *v;
+    bool runnable;
+
+    v = item->vcpu;
+    runnable = vcpu_runnable(v);
+
+    v->new_state = runnable ? RUNSTATE_running
+                            : (v->pause_flags & VPF_blocked)
+                              ? RUNSTATE_blocked : RUNSTATE_offline;
+    return runnable;
+}
+
 static inline void sched_set_res(struct sched_item *item,
                                  struct sched_resource *res)
 {
