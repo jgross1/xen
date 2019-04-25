@@ -281,25 +281,10 @@ static void sched_spin_unlock_double(spinlock_t *lock1, spinlock_t *lock2,
     spin_unlock_irqrestore(lock1, flags);
 }
 
-static void sched_free_item(struct sched_item *item, struct vcpu *v)
+static void sched_free_item_mem(struct sched_item *item)
 {
     struct sched_item *prev_item;
     struct domain *d = item->domain;
-    struct vcpu *vitem;
-    unsigned int cnt = 0;
-
-    /* Don't count to be released vcpu, might be not in vcpu list yet. */
-    for_each_sched_item_vcpu ( item, vitem )
-        if ( vitem != v )
-            cnt++;
-
-    v->sched_item = NULL;
-
-    if ( cnt )
-        return;
-
-    if ( item->vcpu == v )
-        item->vcpu = v->next_in_list;
 
     if ( d->sched_item_list == item )
         d->sched_item_list = item->next_in_list;
@@ -321,6 +306,25 @@ static void sched_free_item(struct sched_item *item, struct vcpu *v)
     free_cpumask_var(item->cpu_soft_affinity);
 
     xfree(item);
+}
+
+static void sched_free_item(struct sched_item *item, struct vcpu *v)
+{
+    struct vcpu *vitem;
+    unsigned int cnt = 0;
+
+    /* Don't count to be released vcpu, might be not in vcpu list yet. */
+    for_each_sched_item_vcpu ( item, vitem )
+        if ( vitem != v )
+            cnt++;
+
+    v->sched_item = NULL;
+
+    if ( item->vcpu == v )
+        item->vcpu = v->next_in_list;
+
+    if ( !cnt )
+        sched_free_item_mem(item);
 }
 
 static void sched_item_add_vcpu(struct sched_item *item, struct vcpu *v)
