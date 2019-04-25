@@ -82,7 +82,18 @@ static struct scheduler __read_mostly ops;
 static inline struct vcpu *sched_item2vcpu_cpu(struct sched_item *item,
                                                unsigned int cpu)
 {
-    return item->domain->vcpu[item->item_id + per_cpu(sched_res_idx, cpu)];
+    unsigned int idx = item->item_id + per_cpu(sched_res_idx, cpu);
+    const struct domain *d = item->domain;
+    struct vcpu *v;
+
+    if ( idx < d->max_vcpus && d->vcpu[idx] )
+    {
+        v = d->vcpu[idx];
+        if ( v->new_state == RUNSTATE_running )
+            return v;
+    }
+
+    return idle_vcpu[cpu];
 }
 
 static inline struct scheduler *dom_scheduler(const struct domain *d)
@@ -196,8 +207,11 @@ static inline void vcpu_runstate_change(
 
     trace_runstate_change(v, new_state);
 
-    item->runstate_cnt[v->runstate.state]--;
-    item->runstate_cnt[new_state]++;
+    if ( !is_idle_vcpu(v) )
+    {
+        item->runstate_cnt[v->runstate.state]--;
+        item->runstate_cnt[new_state]++;
+    }
 
     delta = new_entry_time - v->runstate.state_entry_time;
     if ( delta > 0 )
@@ -207,21 +221,6 @@ static inline void vcpu_runstate_change(
     }
 
     v->runstate.state = new_state;
-}
-
-static inline void sched_item_runstate_change(struct sched_item *item,
-    bool running, s_time_t new_entry_time)
-{
-    struct vcpu *v;
-
-    for_each_sched_item_vcpu( item, v )
-        if ( running )
-            vcpu_runstate_change(v, v->new_state, new_entry_time);
-        else
-            vcpu_runstate_change(v,
-                ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
-                 (vcpu_runnable(v) ? RUNSTATE_runnable : RUNSTATE_offline)),
-                new_entry_time);
 }
 
 void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate)
@@ -456,6 +455,7 @@ int sched_init_vcpu(struct vcpu *v)
     if ( is_idle_domain(d) )
     {
         per_cpu(sched_res, v->processor)->curr = item;
+        per_cpu(sched_res, v->processor)->sched_item_idle = item;
         v->is_running = 1;
         item->is_running = 1;
         item->state_entry_time = NOW();
@@ -1631,33 +1631,67 @@ static void sched_switch_items(struct sched_resource *sd,
                                struct sched_item *next, struct sched_item *prev,
                                s_time_t now)
 {
-    sd->curr = next;
-
-    TRACE_3D(TRC_SCHED_SWITCH_INFPREV, prev->domain->domain_id, prev->item_id,
-             now - prev->state_entry_time);
-    TRACE_4D(TRC_SCHED_SWITCH_INFNEXT, next->domain->domain_id, next->item_id,
-             (next->vcpu->runstate.state == RUNSTATE_runnable) ?
-             (now - next->state_entry_time) : 0, prev->next_time);
+    int cpu;
 
     ASSERT(item_running(prev));
 
-    TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->item_id,
-             next->domain->domain_id, next->item_id);
+    if ( prev != next )
+    {
+        sd->curr = next;
+        sd->prev = prev;
 
-    sched_item_runstate_change(prev, false, now);
-    prev->last_run_time = now;
+        TRACE_3D(TRC_SCHED_SWITCH_INFPREV, prev->domain->domain_id,
+                 prev->item_id, now - prev->state_entry_time);
+        TRACE_4D(TRC_SCHED_SWITCH_INFNEXT, next->domain->domain_id,
+                 next->item_id,
+                 (next->vcpu->runstate.state == RUNSTATE_runnable) ?
+                 (now - next->state_entry_time) : 0, prev->next_time);
+        TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->item_id,
+                 next->domain->domain_id, next->item_id);
 
-    ASSERT(!item_running(next));
-    sched_item_runstate_change(next, true, now);
+        prev->last_run_time = now;
 
-    /*
-     * NB. Don't add any trace records from here until the actual context
-     * switch, else lost_records resume will not work properly.
-     */
+        ASSERT(!item_running(next));
 
-    ASSERT(!next->is_running);
-    next->vcpu->is_running = 1;
-    next->is_running = 1;
+        /*
+         * NB. Don't add any trace records from here until the actual context
+         * switch, else lost_records resume will not work properly.
+         */
+
+        ASSERT(!next->is_running);
+        next->is_running = 1;
+
+        if ( is_idle_item(prev) )
+        {
+            prev->runstate_cnt[RUNSTATE_running] = 0;
+            prev->runstate_cnt[RUNSTATE_runnable] = sched_granularity;
+        }
+        if ( is_idle_item(next) )
+        {
+            next->runstate_cnt[RUNSTATE_running] = sched_granularity;
+            next->runstate_cnt[RUNSTATE_runnable] = 0;
+        }
+    }
+
+    for_each_cpu( cpu, sd->cpus )
+    {
+        struct vcpu *vprev = get_cpu_current(cpu);
+        struct vcpu *vnext = sched_item2vcpu_cpu(next, cpu);
+
+        if ( vprev != vnext || vprev->runstate.state != vnext->new_state )
+        {
+            vcpu_runstate_change(vprev,
+                ((vprev->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
+                 (vcpu_runnable(vprev) ? RUNSTATE_runnable : RUNSTATE_offline)),
+                now);
+            vcpu_runstate_change(vnext, vnext->new_state, now);
+        }
+
+        vnext->is_running = 1;
+
+        if ( is_idle_vcpu(vnext) )
+            vnext->sched_item = next;
+    }
 }
 
 static bool sched_tasklet_check(void)
@@ -1706,25 +1740,25 @@ static struct sched_item *do_schedule(struct sched_item *prev, s_time_t now)
     if ( prev->next_time >= 0 ) /* -ve means no limit */
         set_timer(&sd->s_timer, now + prev->next_time);
 
-    if ( likely(prev != next) )
-        sched_switch_items(sd, next, prev, now);
+    sched_switch_items(sd, next, prev, now);
 
     return next;
 }
 
-static void context_saved(struct vcpu *prev)
+static void context_saved(struct sched_item *item)
 {
-    struct sched_item *item = prev->sched_item;
-
     item->is_running = 0;
     item->state_entry_time = NOW();
+    this_cpu(sched_res)->prev = NULL;
 
     /* Check for migration request /after/ clearing running flag. */
     smp_mb();
 
-    sched_context_saved(vcpu_scheduler(prev), item);
+    sched_context_saved(vcpu_scheduler(item->vcpu), item);
 
-    sched_item_migrate_finish(item);
+    /* Idle never migrates and idle vcpus might belong to other items. */
+    if ( !is_idle_item(item) )
+        sched_item_migrate_finish(item);
 }
 
 /*
@@ -1741,11 +1775,13 @@ static void context_saved(struct vcpu *prev)
 void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
 {
     struct sched_item *next = vnext->sched_item;
+    struct sched_resource *sd = this_cpu(sched_res);
 
     /* Clear running flag /after/ writing context to memory. */
     smp_wmb();
 
-    vprev->is_running = 0;
+    if ( vprev != vnext )
+        vprev->is_running = 0;
 
     if ( atomic_read(&next->rendezvous_out_cnt) )
     {
@@ -1754,20 +1790,23 @@ void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
         /* Call context_saved() before releasing other waiters. */
         if ( cnt == 1 )
         {
-            if ( vprev != vnext )
-                context_saved(vprev);
+            if ( sd->prev )
+                context_saved(sd->prev);
             atomic_set(&next->rendezvous_out_cnt, 0);
         }
         else
             while ( atomic_read(&next->rendezvous_out_cnt) )
                 cpu_relax();
     }
-    else if ( vprev != vnext && sched_granularity == 1 )
-        context_saved(vprev);
+    else if ( sd->prev )
+        context_saved(sd->prev);
+
+    if ( is_idle_vcpu(vprev) && vprev != vnext )
+        vprev->sched_item = sd->sched_item_idle;
 }
 
 static void sched_context_switch(struct vcpu *vprev, struct vcpu *vnext,
-                                 s_time_t now)
+                                 bool reset_idle_item, s_time_t now)
 {
     if ( unlikely(vprev == vnext) )
     {
@@ -1776,6 +1815,10 @@ static void sched_context_switch(struct vcpu *vprev, struct vcpu *vnext,
                  now - vprev->runstate.state_entry_time,
                  vprev->sched_item->next_time);
         sched_context_switched(vprev, vnext);
+
+        if ( reset_idle_item )
+            vnext->sched_item = this_cpu(sched_res)->sched_item_idle;
+
         trace_continue_running(vnext);
         return continue_running(vprev);
     }
@@ -1851,7 +1894,8 @@ static void sched_slave(void)
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
-    sched_context_switch(vprev, sched_item2vcpu_cpu(next, cpu), now);
+    sched_context_switch(vprev, sched_item2vcpu_cpu(next, cpu),
+                         is_idle_item(next) && !is_idle_item(prev), now);
 }
 
 /*
@@ -1911,7 +1955,8 @@ static void schedule(void)
     pcpu_schedule_unlock_irq(lock, cpu);
 
     vnext = sched_item2vcpu_cpu(next, cpu);
-    sched_context_switch(vprev, vnext, now);
+    sched_context_switch(vprev, vnext,
+                         !is_idle_item(prev) && is_idle_item(next), now);
 }
 
 /* The scheduler timer: force a run through the scheduler */
@@ -1993,6 +2038,7 @@ static int cpu_schedule_up(unsigned int cpu)
         return -ENOMEM;
 
     sd->curr = idle_vcpu[cpu]->sched_item;
+    sd->sched_item_idle = idle_vcpu[cpu]->sched_item;
 
     /*
      * We don't want to risk calling xfree() on an sd->sched_priv
@@ -2170,6 +2216,7 @@ void __init scheduler_init(void)
     if ( vcpu_create(idle_domain, 0) == NULL )
         BUG();
     this_cpu(sched_res)->curr = idle_vcpu[0]->sched_item;
+    this_cpu(sched_res)->sched_item_idle = idle_vcpu[0]->sched_item;
     this_cpu(sched_res)->sched_priv = sched_alloc_pdata(&ops, 0);
     BUG_ON(IS_ERR(this_cpu(sched_res)->sched_priv));
     scheduler_percpu_init(0);

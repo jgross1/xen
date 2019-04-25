@@ -76,6 +76,11 @@ struct cpu_info {
     /* get_stack_bottom() must be 16-byte aligned */
 };
 
+static inline struct cpu_info *get_cpu_info_from_stack(unsigned long sp)
+{
+    return (struct cpu_info *)((sp | (STACK_SIZE - 1)) + 1) - 1;
+}
+
 static inline struct cpu_info *get_cpu_info(void)
 {
 #ifdef __clang__
@@ -86,7 +91,7 @@ static inline struct cpu_info *get_cpu_info(void)
     register unsigned long sp asm("rsp");
 #endif
 
-    return (struct cpu_info *)((sp | (STACK_SIZE - 1)) + 1) - 1;
+    return get_cpu_info_from_stack(sp);
 }
 
 #define get_current()         (get_cpu_info()->current_vcpu)

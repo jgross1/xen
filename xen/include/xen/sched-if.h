@@ -39,6 +39,8 @@ struct sched_resource {
     spinlock_t         *schedule_lock,
                        _lock;
     struct sched_item  *curr;           /* current task                    */
+    struct sched_item  *sched_item_idle;
+    struct sched_item  *prev;           /* previous task                   */
     void               *sched_priv;
     struct timer        s_timer;        /* scheduling timer                */
     atomic_t            urgent_count;   /* how many urgent vcpus           */
@@ -152,7 +154,7 @@ static inline void sched_clear_pause_flags_atomic(struct sched_item *item,
 
 static inline struct sched_item *sched_idle_item(unsigned int cpu)
 {
-    return idle_vcpu[cpu]->sched_item;
+    return per_cpu(sched_res, cpu)->sched_item_idle;
 }
 
 static inline unsigned int sched_get_resource_cpu(unsigned int cpu)

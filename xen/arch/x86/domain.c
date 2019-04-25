@@ -154,6 +154,24 @@ static void idle_loop(void)
     }
 }
 
+/*
+ * Idle loop for siblings of active schedule items.
+ * We don't do any standard idle work like tasklets, page scrubbing or
+ * livepatching.
+ * Use default_idle() in order to simulate v->is_urgent.
+ */
+static void guest_idle_loop(void)
+{
+    unsigned int cpu = smp_processor_id();
+
+    for ( ; ; )
+    {
+        if ( !softirq_pending(cpu) )
+            default_idle();
+        do_softirq();
+    }
+}
+
 void startup_cpu_idle_loop(void)
 {
     struct vcpu *v = current;
@@ -167,6 +185,9 @@ void startup_cpu_idle_loop(void)
 
 static void noreturn continue_idle_domain(struct vcpu *v)
 {
+    if ( !is_idle_item(v->sched_item) )
+        reset_stack_and_jump(guest_idle_loop);
+
     reset_stack_and_jump(idle_loop);
 }
 
