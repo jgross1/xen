@@ -68,6 +68,7 @@ static void poll_timer_fn(void *data);
 /* This is global for now so that private implementations can reach it */
 DEFINE_PER_CPU(struct scheduler *, scheduler);
 DEFINE_PER_CPU(struct sched_resource *, sched_res);
+static DEFINE_PER_CPU(unsigned int, sched_res_idx);
 
 /* Scratch space for cpumasks. */
 DEFINE_PER_CPU(cpumask_t, cpumask_scratch);
@@ -77,6 +78,12 @@ extern const struct scheduler *__start_schedulers_array[], *__end_schedulers_arr
 #define schedulers __start_schedulers_array
 
 static struct scheduler __read_mostly ops;
+
+static inline struct vcpu *sched_item2vcpu_cpu(struct sched_item *item,
+                                               unsigned int cpu)
+{
+    return item->domain->vcpu[item->item_id + per_cpu(sched_res_idx, cpu)];
+}
 
 static inline struct scheduler *dom_scheduler(const struct domain *d)
 {
@@ -1844,7 +1851,7 @@ static void sched_slave(void)
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
-    sched_context_switch(vprev, next->vcpu, now);
+    sched_context_switch(vprev, sched_item2vcpu_cpu(next, cpu), now);
 }
 
 /*
@@ -1903,7 +1910,7 @@ static void schedule(void)
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
-    vnext = next->vcpu;
+    vnext = sched_item2vcpu_cpu(next, cpu);
     sched_context_switch(vprev, vnext, now);
 }
 
