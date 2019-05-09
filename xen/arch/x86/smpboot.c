@@ -382,6 +382,8 @@ void start_secondary(void *unused)
 
     set_cpu_sibling_map(cpu);
 
+    scheduler_percpu_init(cpu);
+
     init_percpu_time();
 
     setup_secondary_APIC_clock();
