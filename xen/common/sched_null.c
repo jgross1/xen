@@ -206,7 +206,7 @@ static void *null_alloc_vdata(const struct scheduler *ops,
     INIT_LIST_HEAD(&nvc->waitq_elem);
     nvc->vcpu = v;
 
-    SCHED_STAT_CRANK(vcpu_alloc);
+    SCHED_STAT_CRANK(unit_alloc);
 
     return nvc;
 }
@@ -464,7 +464,7 @@ static void null_unit_insert(const struct scheduler *ops,
     }
     spin_unlock_irq(lock);
 
-    SCHED_STAT_CRANK(vcpu_insert);
+    SCHED_STAT_CRANK(unit_insert);
 }
 
 static void _vcpu_remove(struct null_private *prv, struct vcpu *v)
@@ -535,7 +535,7 @@ static void null_unit_remove(const struct scheduler *ops,
  out:
     unit_schedule_unlock_irq(lock, unit);
 
-    SCHED_STAT_CRANK(vcpu_remove);
+    SCHED_STAT_CRANK(unit_remove);
 }
 
 static void null_unit_wake(const struct scheduler *ops,
@@ -547,21 +547,21 @@ static void null_unit_wake(const struct scheduler *ops,
 
     if ( unlikely(curr_on_cpu(v->processor) == unit) )
     {
-        SCHED_STAT_CRANK(vcpu_wake_running);
+        SCHED_STAT_CRANK(unit_wake_running);
         return;
     }
 
     if ( unlikely(!list_empty(&null_unit(unit)->waitq_elem)) )
     {
         /* Not exactly "on runq", but close enough for reusing the counter */
-        SCHED_STAT_CRANK(vcpu_wake_onrunq);
+        SCHED_STAT_CRANK(unit_wake_onrunq);
         return;
     }
 
     if ( likely(vcpu_runnable(v)) )
-        SCHED_STAT_CRANK(vcpu_wake_runnable);
+        SCHED_STAT_CRANK(unit_wake_runnable);
     else
-        SCHED_STAT_CRANK(vcpu_wake_not_runnable);
+        SCHED_STAT_CRANK(unit_wake_not_runnable);
 
     /* Note that we get here only for vCPUs assigned to a pCPU */
     cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
@@ -578,7 +578,7 @@ static void null_unit_sleep(const struct scheduler *ops,
     if ( curr_on_cpu(v->processor) == unit )
         cpu_raise_softirq(v->processor, SCHEDULE_SOFTIRQ);
 
-    SCHED_STAT_CRANK(vcpu_sleep);
+    SCHED_STAT_CRANK(unit_sleep);
 }
 
 static struct sched_resource *
@@ -688,7 +688,7 @@ static inline void null_vcpu_check(struct vcpu *v)
     else
         BUG_ON(!is_idle_vcpu(v));
 
-    SCHED_STAT_CRANK(vcpu_check);
+    SCHED_STAT_CRANK(unit_check);
 }
 #define NULL_VCPU_CHECK(v)  (null_vcpu_check(v))
 #else
