@@ -132,7 +132,7 @@ static void __prepare_to_wait(struct waitqueue_vcpu *wqv)
 
     /* Save current VCPU affinity; force wakeup on *this* CPU only. */
     wqv->wakeup_cpu = smp_processor_id();
-    cpumask_copy(&wqv->saved_affinity, curr->cpu_hard_affinity);
+    cpumask_copy(&wqv->saved_affinity, curr->sched_unit->cpu_hard_affinity);
     if ( vcpu_set_hard_affinity(curr, cpumask_of(wqv->wakeup_cpu)) )
     {
         gdprintk(XENLOG_ERR, "Unable to set vcpu affinity\n");
@@ -199,7 +199,7 @@ void check_wakeup_from_wait(void)
     {
         /* Re-set VCPU affinity and re-enter the scheduler. */
         struct vcpu *curr = current;
-        cpumask_copy(&wqv->saved_affinity, curr->cpu_hard_affinity);
+        cpumask_copy(&wqv->saved_affinity, curr->sched_unit->cpu_hard_affinity);
         if ( vcpu_set_hard_affinity(curr, cpumask_of(wqv->wakeup_cpu)) )
         {
             gdprintk(XENLOG_ERR, "Unable to set vcpu affinity\n");
