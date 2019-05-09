@@ -289,12 +289,13 @@ static struct sched_unit *sched_alloc_unit(struct vcpu *v)
 
     v->sched_unit = unit;
     unit->vcpu = v;
+    unit->unit_id = v->vcpu_id;
     unit->domain = d;
 
     for ( prev_unit = &d->sched_unit_list; *prev_unit;
           prev_unit = &(*prev_unit)->next_in_list )
         if ( (*prev_unit)->next_in_list &&
-             (*prev_unit)->next_in_list->vcpu->vcpu_id > v->vcpu_id )
+             (*prev_unit)->next_in_list->unit_id > unit->unit_id )
             break;
 
     unit->next_in_list = *prev_unit;
