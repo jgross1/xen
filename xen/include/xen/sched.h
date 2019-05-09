@@ -272,6 +272,8 @@ struct sched_unit {
     uint64_t               last_run_time;
     /* Last time unit got (de-)scheduled. */
     uint64_t               state_entry_time;
+    /* Vcpu state summary. */
+    unsigned int           runstate_cnt[4];
 
     /* Currently running on a CPU? */
     bool                   is_running;
