@@ -279,7 +279,15 @@ struct vcpu
 struct sched_unit {
     struct vcpu           *vcpu;
     void                  *priv;      /* scheduler private data */
+    struct sched_unit     *next_in_list;
 };
+
+#define for_each_sched_unit(d, e)                                         \
+    for ( (e) = (d)->sched_unit_list; (e) != NULL; (e) = (e)->next_in_list )
+
+#define for_each_sched_unit_vcpu(i, v)                                    \
+    for ( (v) = (i)->vcpu; (v) != NULL && (v)->sched_unit == (i);         \
+          (v) = (v)->next_in_list )
 
 /* Per-domain lock can be recursively acquired in fault handlers. */
 #define domain_lock(d) spin_lock_recursive(&(d)->domain_lock)
@@ -339,6 +347,7 @@ struct domain
 
     /* Scheduling. */
     void            *sched_priv;    /* scheduler-specific data */
+    struct sched_unit *sched_unit_list;
     struct cpupool  *cpupool;
 
     struct domain   *next_in_list;
