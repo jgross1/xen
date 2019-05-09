@@ -632,12 +632,12 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
 }
 
 /*
- * Pick a valid CPU for the vcpu vc
- * Valid CPU of a vcpu is intesection of vcpu's affinity
- * and available cpus
+ * Pick a valid resource for the vcpu vc
+ * Valid resource of a vcpu is intesection of vcpu's affinity
+ * and available resources
  */
-static int
-rt_cpu_pick(const struct scheduler *ops, struct sched_unit *unit)
+static struct sched_resource *
+rt_res_pick(const struct scheduler *ops, struct sched_unit *unit)
 {
     struct vcpu *vc = unit->vcpu;
     cpumask_t cpus;
@@ -652,7 +652,7 @@ rt_cpu_pick(const struct scheduler *ops, struct sched_unit *unit)
             : cpumask_cycle(vc->processor, &cpus);
     ASSERT( !cpumask_empty(&cpus) && cpumask_test_cpu(cpu, &cpus) );
 
-    return cpu;
+    return get_sched_res(cpu);
 }
 
 /*
@@ -893,8 +893,8 @@ rt_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
     BUG_ON( is_idle_vcpu(vc) );
 
     /* This is safe because vc isn't yet being scheduled */
-    vc->processor = rt_cpu_pick(ops, unit);
-    unit->res = get_sched_res(vc->processor);
+    unit->res = rt_res_pick(ops, unit);
+    vc->processor = unit->res->processor;
 
     lock = vcpu_schedule_lock_irq(vc);
 
@@ -1563,7 +1563,7 @@ static const struct scheduler sched_rtds_def = {
 
     .adjust         = rt_dom_cntl,
 
-    .pick_cpu       = rt_cpu_pick,
+    .pick_resource  = rt_res_pick,
     .do_schedule    = rt_schedule,
     .sleep          = rt_unit_sleep,
     .wake           = rt_unit_wake,
