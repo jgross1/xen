@@ -101,22 +101,22 @@ static inline void kind##_schedule_unlock##irq(spinlock_t *lock \
 
 #define EXTRA_TYPE(arg)
 sched_lock(pcpu, unsigned int cpu,     cpu, )
-sched_lock(vcpu, const struct vcpu *v, v->processor, )
+sched_lock(unit, const struct sched_unit *i, i->res->processor, )
 sched_lock(pcpu, unsigned int cpu,     cpu,          _irq)
-sched_lock(vcpu, const struct vcpu *v, v->processor, _irq)
+sched_lock(unit, const struct sched_unit *i, i->res->processor, _irq)
 sched_unlock(pcpu, unsigned int cpu,     cpu, )
-sched_unlock(vcpu, const struct vcpu *v, v->processor, )
+sched_unlock(unit, const struct sched_unit *i, i->res->processor, )
 sched_unlock(pcpu, unsigned int cpu,     cpu,          _irq)
-sched_unlock(vcpu, const struct vcpu *v, v->processor, _irq)
+sched_unlock(unit, const struct sched_unit *i, i->res->processor, _irq)
 #undef EXTRA_TYPE
 
 #define EXTRA_TYPE(arg) , unsigned long arg
 #define spin_unlock_irqsave spin_unlock_irqrestore
 sched_lock(pcpu, unsigned int cpu,     cpu,          _irqsave, *flags)
-sched_lock(vcpu, const struct vcpu *v, v->processor, _irqsave, *flags)
+sched_lock(unit, const struct sched_unit *i, i->res->processor, _irqsave, *flags)
 #undef spin_unlock_irqsave
 sched_unlock(pcpu, unsigned int cpu,     cpu,          _irqrestore, flags)
-sched_unlock(vcpu, const struct vcpu *v, v->processor, _irqrestore, flags)
+sched_unlock(unit, const struct sched_unit *i, i->res->processor, _irqrestore, flags)
 #undef EXTRA_TYPE
 
 #undef sched_unlock
