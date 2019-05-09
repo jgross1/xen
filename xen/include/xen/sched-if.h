@@ -59,6 +59,57 @@ static inline void set_sched_res(unsigned int cpu, struct sched_resource *res)
     per_cpu(sched_res, cpu) = res;
 }
 
+static inline bool is_idle_unit(const struct sched_unit *unit)
+{
+    return is_idle_vcpu(unit->vcpu);
+}
+
+static inline bool unit_runnable(const struct sched_unit *unit)
+{
+    return vcpu_runnable(unit->vcpu);
+}
+
+static inline void sched_set_res(struct sched_unit *unit,
+                                 struct sched_resource *res)
+{
+    unit->vcpu->processor = res->processor;
+    unit->res = res;
+}
+
+static inline unsigned int sched_unit_cpu(struct sched_unit *unit)
+{
+    return unit->res->processor;
+}
+
+static inline void sched_set_pause_flags(struct sched_unit *unit,
+                                         unsigned int bit)
+{
+    __set_bit(bit, &unit->vcpu->pause_flags);
+}
+
+static inline void sched_clear_pause_flags(struct sched_unit *unit,
+                                           unsigned int bit)
+{
+    __clear_bit(bit, &unit->vcpu->pause_flags);
+}
+
+static inline void sched_set_pause_flags_atomic(struct sched_unit *unit,
+                                                unsigned int bit)
+{
+    set_bit(bit, &unit->vcpu->pause_flags);
+}
+
+static inline void sched_clear_pause_flags_atomic(struct sched_unit *unit,
+                                                  unsigned int bit)
+{
+    clear_bit(bit, &unit->vcpu->pause_flags);
+}
+
+static inline struct sched_unit *sched_idle_unit(unsigned int cpu)
+{
+    return idle_vcpu[cpu]->sched_unit;
+}
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:
@@ -345,10 +396,7 @@ static inline void sched_migrate(const struct scheduler *s,
     if ( s->migrate )
         s->migrate(s, unit, cpu);
     else
-    {
-        unit->vcpu->processor = cpu;
-        unit->res = get_sched_res(cpu);
-    }
+        sched_set_res(unit, get_sched_res(cpu));
 }
 
 static inline struct sched_resource *sched_pick_resource(
