@@ -208,6 +208,7 @@ extern seg_desc_t boot_cpu_gdt_table[];
 DECLARE_PER_CPU(seg_desc_t *, gdt_table);
 extern seg_desc_t boot_cpu_compat_gdt_table[];
 DECLARE_PER_CPU(seg_desc_t *, compat_gdt_table);
+DECLARE_PER_CPU(bool, full_gdt_loaded);
 
 extern void load_TR(void);
 
