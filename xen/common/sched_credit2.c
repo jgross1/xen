@@ -3265,8 +3265,9 @@ runq_candidate(struct csched2_runqueue_data *rqd,
                unsigned int *skipped)
 {
     struct list_head *iter, *temp;
+    struct sched_resource *sd = get_sched_res(cpu);
     struct csched2_unit *snext = NULL;
-    struct csched2_private *prv = csched2_priv(per_cpu(scheduler, cpu));
+    struct csched2_private *prv = csched2_priv(sd->scheduler);
     bool yield = false, soft_aff_preempt = false;
 
     *skipped = 0;
