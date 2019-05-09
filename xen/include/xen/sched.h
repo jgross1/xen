@@ -266,6 +266,7 @@ struct sched_unit {
     void                  *priv;      /* scheduler private data */
     struct sched_unit     *next_in_list;
     struct sched_resource *res;
+    int                    unit_id;
 
     /* Item needs affinity restored. */
     bool                   affinity_broken;
