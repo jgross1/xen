@@ -57,6 +57,7 @@ integer_param("sched_ratelimit_us", sched_ratelimit_us);
 
 /* Number of vcpus per struct sched_unit. */
 static unsigned int sched_granularity = 1;
+bool sched_disable_smt_switching;
 const cpumask_t *sched_res_mask = &cpumask_all;
 
 /* Various timer handlers. */

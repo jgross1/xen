@@ -200,7 +200,8 @@ long arch_do_sysctl(
 
         case XEN_SYSCTL_CPU_HOTPLUG_SMT_ENABLE:
         case XEN_SYSCTL_CPU_HOTPLUG_SMT_DISABLE:
-            if ( !cpu_has_htt || boot_cpu_data.x86_num_siblings < 2 )
+            if ( !cpu_has_htt || boot_cpu_data.x86_num_siblings < 2 ||
+                 sched_disable_smt_switching )
             {
                 ret = -EOPNOTSUPP;
                 break;
