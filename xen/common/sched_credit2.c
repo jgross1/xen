@@ -273,7 +273,7 @@
  * CSFLAG_delayed_runq_add: Do we need to add this to the runqueue once it'd done
  * being context switched out?
  * + Set when scheduling out in csched2_schedule() if prev is runnable
- * + Set in csched2_vcpu_wake if it finds CSFLAG_scheduled set
+ * + Set in csched2_unit_wake if it finds CSFLAG_scheduled set
  * + Read in csched2_context_saved().  If set, it adds prev to the runqueue and
  *   clears the bit.
  */
@@ -623,14 +623,14 @@ static inline bool has_cap(const struct csched2_vcpu *svc)
  * This logic is entirely implemented in runq_tickle(), and that is enough.
  * In fact, in this scheduler, placement of a vcpu on one of the pcpus of a
  * runq, _always_ happens by means of tickling:
- *  - when a vcpu wakes up, it calls csched2_vcpu_wake(), which calls
+ *  - when a vcpu wakes up, it calls csched2_unit_wake(), which calls
  *    runq_tickle();
  *  - when a migration is initiated in schedule.c, we call csched2_cpu_pick(),
- *    csched2_vcpu_migrate() (which calls migrate()) and csched2_vcpu_wake().
+ *    csched2_unit_migrate() (which calls migrate()) and csched2_unit_wake().
  *    csched2_cpu_pick() looks for the least loaded runq and return just any
- *    of its processors. Then, csched2_vcpu_migrate() just moves the vcpu to
+ *    of its processors. Then, csched2_unit_migrate() just moves the vcpu to
  *    the chosen runq, and it is again runq_tickle(), called by
- *    csched2_vcpu_wake() that actually decides what pcpu to use within the
+ *    csched2_unit_wake() that actually decides what pcpu to use within the
  *    chosen runq;
  *  - when a migration is initiated in sched_credit2.c, by calling  migrate()
  *    directly, that again temporarily use a random pcpu from the new runq,
@@ -2026,8 +2026,10 @@ csched2_vcpu_check(struct vcpu *vc)
 #endif
 
 static void *
-csched2_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
+csched2_alloc_vdata(const struct scheduler *ops, struct sched_unit *unit,
+                    void *dd)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu *svc;
 
     /* Allocate per-VCPU info */
@@ -2069,8 +2071,9 @@ csched2_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 }
 
 static void
-csched2_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
+csched2_unit_sleep(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu * const svc = csched2_vcpu(vc);
 
     ASSERT(!is_idle_vcpu(vc));
@@ -2091,8 +2094,9 @@ csched2_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
 }
 
 static void
-csched2_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
+csched2_unit_wake(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu * const svc = csched2_vcpu(vc);
     unsigned int cpu = vc->processor;
     s_time_t now;
@@ -2146,16 +2150,18 @@ out:
 }
 
 static void
-csched2_vcpu_yield(const struct scheduler *ops, struct vcpu *v)
+csched2_unit_yield(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *v = unit->vcpu;
     struct csched2_vcpu * const svc = csched2_vcpu(v);
 
     __set_bit(__CSFLAG_vcpu_yield, &svc->flags);
 }
 
 static void
-csched2_context_saved(const struct scheduler *ops, struct vcpu *vc)
+csched2_context_saved(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu * const svc = csched2_vcpu(vc);
     spinlock_t *lock = vcpu_schedule_lock_irq(vc);
     s_time_t now = NOW();
@@ -2196,9 +2202,10 @@ csched2_context_saved(const struct scheduler *ops, struct vcpu *vc)
 
 #define MAX_LOAD (STIME_MAX)
 static int
-csched2_cpu_pick(const struct scheduler *ops, struct vcpu *vc)
+csched2_cpu_pick(const struct scheduler *ops, struct sched_unit *unit)
 {
     struct csched2_private *prv = csched2_priv(ops);
+    struct vcpu *vc = unit->vcpu;
     int i, min_rqi = -1, min_s_rqi = -1;
     unsigned int new_cpu, cpu = vc->processor;
     struct csched2_vcpu *svc = csched2_vcpu(vc);
@@ -2733,9 +2740,10 @@ retry:
 }
 
 static void
-csched2_vcpu_migrate(
-    const struct scheduler *ops, struct vcpu *vc, unsigned int new_cpu)
+csched2_unit_migrate(
+    const struct scheduler *ops, struct sched_unit *unit, unsigned int new_cpu)
 {
+    struct vcpu *vc = unit->vcpu;
     struct domain *d = vc->domain;
     struct csched2_vcpu * const svc = csched2_vcpu(vc);
     struct csched2_runqueue_data *trqd;
@@ -2996,9 +3004,10 @@ csched2_dom_cntl(
 }
 
 static void
-csched2_aff_cntl(const struct scheduler *ops, struct vcpu *v,
+csched2_aff_cntl(const struct scheduler *ops, struct sched_unit *unit,
                  const cpumask_t *hard, const cpumask_t *soft)
 {
+    struct vcpu *v = unit->vcpu;
     struct csched2_vcpu *svc = csched2_vcpu(v);
 
     if ( !hard )
@@ -3096,8 +3105,9 @@ csched2_free_domdata(const struct scheduler *ops, void *data)
 }
 
 static void
-csched2_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
+csched2_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu *svc = vc->sched_priv;
     struct csched2_dom * const sdom = svc->sdom;
     spinlock_t *lock;
@@ -3108,7 +3118,7 @@ csched2_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     /* csched2_cpu_pick() expects the pcpu lock to be held */
     lock = vcpu_schedule_lock_irq(vc);
 
-    vc->processor = csched2_cpu_pick(ops, vc);
+    vc->processor = csched2_cpu_pick(ops, unit);
 
     spin_unlock_irq(lock);
 
@@ -3135,8 +3145,9 @@ csched2_free_vdata(const struct scheduler *ops, void *priv)
 }
 
 static void
-csched2_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
+csched2_unit_remove(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched2_vcpu * const svc = csched2_vcpu(vc);
     spinlock_t *lock;
 
@@ -4074,19 +4085,19 @@ static const struct scheduler sched_credit2_def = {
 
     .global_init    = csched2_global_init,
 
-    .insert_vcpu    = csched2_vcpu_insert,
-    .remove_vcpu    = csched2_vcpu_remove,
+    .insert_unit    = csched2_unit_insert,
+    .remove_unit    = csched2_unit_remove,
 
-    .sleep          = csched2_vcpu_sleep,
-    .wake           = csched2_vcpu_wake,
-    .yield          = csched2_vcpu_yield,
+    .sleep          = csched2_unit_sleep,
+    .wake           = csched2_unit_wake,
+    .yield          = csched2_unit_yield,
 
     .adjust         = csched2_dom_cntl,
     .adjust_affinity= csched2_aff_cntl,
     .adjust_global  = csched2_sys_cntl,
 
     .pick_cpu       = csched2_cpu_pick,
-    .migrate        = csched2_vcpu_migrate,
+    .migrate        = csched2_unit_migrate,
     .do_schedule    = csched2_schedule,
     .context_saved  = csched2_context_saved,
 

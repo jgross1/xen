@@ -275,6 +275,10 @@ struct vcpu
     struct arch_vcpu arch;
 };
 
+struct sched_unit {
+    struct vcpu           *vcpu;
+};
+
 /* Per-domain lock can be recursively acquired in fault handlers. */
 #define domain_lock(d) spin_lock_recursive(&(d)->domain_lock)
 #define domain_unlock(d) spin_unlock_recursive(&(d)->domain_lock)
