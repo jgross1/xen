@@ -177,7 +177,7 @@ static void repl_timer_handler(void *data);
 /*
  * System-wide private data, include global RunQueue/DepletedQ
  * Global lock is referenced by sched_res->schedule_lock from all
- * physical cpus. It can be grabbed via vcpu_schedule_lock_irq()
+ * physical cpus. It can be grabbed via unit_schedule_lock_irq()
  */
 struct rt_private {
     spinlock_t lock;            /* the global coarse-grained lock */
@@ -897,7 +897,7 @@ rt_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
     unit->res = rt_res_pick(ops, unit);
     vc->processor = unit->res->processor;
 
-    lock = vcpu_schedule_lock_irq(vc);
+    lock = unit_schedule_lock_irq(unit);
 
     now = NOW();
     if ( now >= svc->cur_deadline )
@@ -910,7 +910,7 @@ rt_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
         if ( !vc->is_running )
             runq_insert(ops, svc);
     }
-    vcpu_schedule_unlock_irq(lock, vc);
+    unit_schedule_unlock_irq(lock, unit);
 
     SCHED_STAT_CRANK(vcpu_insert);
 }
@@ -921,7 +921,6 @@ rt_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
 static void
 rt_unit_remove(const struct scheduler *ops, struct sched_unit *unit)
 {
-    struct vcpu *vc = unit->vcpu;
     struct rt_unit * const svc = rt_unit(unit);
     struct rt_dom * const sdom = svc->sdom;
     spinlock_t *lock;
@@ -930,14 +929,14 @@ rt_unit_remove(const struct scheduler *ops, struct sched_unit *unit)
 
     BUG_ON( sdom == NULL );
 
-    lock = vcpu_schedule_lock_irq(vc);
+    lock = unit_schedule_lock_irq(unit);
     if ( vcpu_on_q(svc) )
         q_remove(svc);
 
     if ( vcpu_on_replq(svc) )
         replq_remove(ops,svc);
 
-    vcpu_schedule_unlock_irq(lock, vc);
+    unit_schedule_unlock_irq(lock, unit);
 }
 
 /*
@@ -1332,7 +1331,7 @@ rt_context_saved(const struct scheduler *ops, struct sched_unit *unit)
 {
     struct vcpu *vc = unit->vcpu;
     struct rt_unit *svc = rt_unit(unit);
-    spinlock_t *lock = vcpu_schedule_lock_irq(vc);
+    spinlock_t *lock = unit_schedule_lock_irq(unit);
 
     __clear_bit(__RTDS_scheduled, &svc->flags);
     /* not insert idle vcpu to runq */
@@ -1349,7 +1348,7 @@ rt_context_saved(const struct scheduler *ops, struct sched_unit *unit)
         replq_remove(ops, svc);
 
 out:
-    vcpu_schedule_unlock_irq(lock, vc);
+    unit_schedule_unlock_irq(lock, unit);
 }
 
 /*
