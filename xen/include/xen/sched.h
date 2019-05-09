@@ -281,6 +281,8 @@ struct sched_unit {
     bool                   affinity_broken;
     /* Does soft affinity actually play a role (given hard affinity)? */
     bool                   soft_aff_effective;
+    /* Item has been migrated to other cpu(s). */
+    bool                   migrated;
     /* Bitmask of CPUs on which this VCPU may run. */
     cpumask_var_t          cpu_hard_affinity;
     /* Used to change affinity temporarily. */
@@ -289,6 +291,10 @@ struct sched_unit {
     cpumask_var_t          cpu_hard_affinity_saved;
     /* Bitmask of CPUs on which this VCPU prefers to run. */
     cpumask_var_t          cpu_soft_affinity;
+
+    /* Next unit to run. */
+    struct sched_unit      *next_task;
+    s_time_t                next_time;
 };
 
 #define for_each_sched_unit(d, e)                                         \
