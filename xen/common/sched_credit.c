@@ -1071,7 +1071,7 @@ csched_unit_remove(const struct scheduler *ops, struct sched_unit *unit)
     if ( test_and_clear_bit(CSCHED_FLAG_UNIT_PARKED, &svc->flags) )
     {
         SCHED_STAT_CRANK(unit_unpark);
-        vcpu_unpause(svc->unit->vcpu);
+        sched_unit_unpause(svc->unit);
     }
 
     spin_lock_irq(&prv->lock);
@@ -1521,7 +1521,7 @@ csched_acct(void* dummy)
                      !test_and_set_bit(CSCHED_FLAG_UNIT_PARKED, &svc->flags) )
                 {
                     SCHED_STAT_CRANK(unit_park);
-                    vcpu_pause_nosync(svc->unit->vcpu);
+                    sched_unit_pause_nosync(svc->unit);
                 }
 
                 /* Lower bound on credits */
@@ -1545,7 +1545,7 @@ csched_acct(void* dummy)
                      * if it is woken up here.
                      */
                     SCHED_STAT_CRANK(unit_unpark);
-                    vcpu_unpause(svc->unit->vcpu);
+                    sched_unit_unpause(svc->unit);
                     clear_bit(CSCHED_FLAG_UNIT_PARKED, &svc->flags);
                 }
 
