@@ -1535,7 +1535,7 @@ static void schedule(void)
     sched = this_cpu(scheduler);
     next_slice = sched->do_schedule(sched, now, tasklet_work_scheduled);
 
-    next = next_slice.task;
+    next = next_slice.task->vcpu;
 
     sd->curr = next->sched_unit;
 
