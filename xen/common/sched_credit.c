@@ -1690,7 +1690,7 @@ csched_load_balance(struct csched_private *prv, int cpu,
     int peer_cpu, first_cpu, peer_node, bstep;
     int node = cpu_to_node(cpu);
 
-    BUG_ON( cpu != sched_unit_cpu(snext->unit) );
+    BUG_ON( sched_get_resource_cpu(cpu) != sched_unit_cpu(snext->unit) );
     online = cpupool_online_cpumask(c);
 
     /*
@@ -1831,8 +1831,9 @@ static struct task_slice
 csched_schedule(
     const struct scheduler *ops, s_time_t now, bool_t tasklet_work_scheduled)
 {
-    const int cpu = smp_processor_id();
-    struct list_head * const runq = RUNQ(cpu);
+    const unsigned int cpu = smp_processor_id();
+    const unsigned int sched_cpu = sched_get_resource_cpu(cpu);
+    struct list_head * const runq = RUNQ(sched_cpu);
     struct sched_unit *unit = current->sched_unit;
     struct csched_unit * const scurr = CSCHED_UNIT(unit);
     struct csched_private *prv = CSCHED_PRIV(ops);
@@ -1942,7 +1943,7 @@ csched_schedule(
     {
         BUG_ON( is_idle_unit(unit) || list_empty(runq) );
         /* Current has blocked. Update the runnable counter for this cpu. */
-        dec_nr_runnable(cpu);
+        dec_nr_runnable(sched_cpu);
     }
 
     snext = __runq_elem(runq->next);
@@ -1952,7 +1953,7 @@ csched_schedule(
     if ( tasklet_work_scheduled )
     {
         TRACE_0D(TRC_CSCHED_SCHED_TASKLET);
-        snext = CSCHED_UNIT(sched_idle_unit(cpu));
+        snext = CSCHED_UNIT(sched_idle_unit(sched_cpu));
         snext->pri = CSCHED_PRI_TS_BOOST;
     }
 
@@ -1972,7 +1973,7 @@ csched_schedule(
     if ( snext->pri > CSCHED_PRI_TS_OVER )
         __runq_remove(snext);
     else
-        snext = csched_load_balance(prv, cpu, snext, &ret.migrated);
+        snext = csched_load_balance(prv, sched_cpu, snext, &ret.migrated);
 
     /*
      * Update idlers mask if necessary. When we're idling, other CPUs
@@ -1980,12 +1981,12 @@ csched_schedule(
      */
     if ( !tasklet_work_scheduled && snext->pri == CSCHED_PRI_IDLE )
     {
-        if ( !cpumask_test_cpu(cpu, prv->idlers) )
-            cpumask_set_cpu(cpu, prv->idlers);
+        if ( !cpumask_test_cpu(sched_cpu, prv->idlers) )
+            cpumask_set_cpu(sched_cpu, prv->idlers);
     }
-    else if ( cpumask_test_cpu(cpu, prv->idlers) )
+    else if ( cpumask_test_cpu(sched_cpu, prv->idlers) )
     {
-        cpumask_clear_cpu(cpu, prv->idlers);
+        cpumask_clear_cpu(sched_cpu, prv->idlers);
     }
 
     if ( !is_idle_unit(snext->unit) )
