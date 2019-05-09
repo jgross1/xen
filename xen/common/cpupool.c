@@ -34,8 +34,6 @@ static cpumask_t cpupool_locked_cpus;
 
 static DEFINE_SPINLOCK(cpupool_lock);
 
-DEFINE_PER_CPU(struct cpupool *, cpupool);
-
 #define cpupool_dprintk(x...) ((void)0)
 
 static void free_cpupool_struct(struct cpupool *c)
@@ -494,7 +492,7 @@ static int cpupool_cpu_add(unsigned int cpu)
      * (or unplugging would have failed) and that is the default behavior
      * anyway.
      */
-    per_cpu(cpupool, cpu) = NULL;
+    get_sched_res(cpu)->cpupool = NULL;
     ret = cpupool_assign_cpu_locked(cpupool0, cpu);
 
     spin_unlock(&cpupool_lock);
