@@ -775,7 +775,8 @@ static void null_schedule(const struct scheduler *ops, struct sched_unit *prev,
         spin_unlock(&prv->waitq_lock);
     }
 
-    if ( unlikely(prev->next_task == NULL || !unit_runnable(prev->next_task)) )
+    if ( unlikely(prev->next_task == NULL ||
+                  !unit_runnable_state(prev->next_task)) )
         prev->next_task = sched_idle_unit(sched_cpu);
 
     NULL_UNIT_CHECK(prev->next_task);
