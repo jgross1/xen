@@ -206,7 +206,7 @@ static inline void sched_unit_runstate_change(struct sched_unit *unit,
     struct vcpu *v = unit->vcpu;
 
     if ( running )
-        vcpu_runstate_change(v, RUNSTATE_running, new_entry_time);
+        vcpu_runstate_change(v, v->new_state, new_entry_time);
     else
         vcpu_runstate_change(v,
             ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
