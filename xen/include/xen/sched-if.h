@@ -25,6 +25,15 @@ extern int sched_ratelimit_us;
 /* Scheduling resource mask. */
 extern const cpumask_t *sched_res_mask;
 
+/* Number of vcpus per struct sched_unit. */
+enum sched_gran {
+    SCHED_GRAN_cpu,
+    SCHED_GRAN_core,
+    SCHED_GRAN_socket
+};
+extern enum sched_gran opt_sched_granularity;
+extern unsigned int sched_granularity;
+
 /*
  * In order to allow a scheduler to remap the lock->cpu mapping,
  * we have a per-cpu pointer, along with a pre-allocated set of
@@ -47,6 +56,7 @@ struct sched_resource {
     struct timer        s_timer;        /* scheduling timer                */
     atomic_t            urgent_count;   /* how many urgent vcpus           */
     unsigned int        processor;
+    unsigned int        granularity;
     const cpumask_t    *cpus;           /* cpus covered by this struct     */
 };
 
@@ -520,6 +530,8 @@ struct cpupool
     unsigned int     n_dom;
     struct scheduler *sched;
     atomic_t         refcnt;
+    unsigned int     granularity;
+    enum sched_gran  opt_granularity;
 };
 
 #define cpupool_online_cpumask(_pool) \

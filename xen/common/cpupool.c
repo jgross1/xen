@@ -177,6 +177,8 @@ static struct cpupool *cpupool_create(
             return NULL;
         }
     }
+    c->granularity = sched_granularity;
+    c->opt_granularity = opt_sched_granularity;
 
     *q = c;
 
