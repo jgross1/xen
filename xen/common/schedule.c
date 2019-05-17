@@ -61,6 +61,9 @@ unsigned int sched_granularity = 1;
 bool sched_disable_smt_switching;
 const cpumask_t *sched_res_mask = &cpumask_all;
 
+/* Common lock for free cpus. */
+static DEFINE_SPINLOCK(sched_free_cpu_lock);
+
 /* Various timer handlers. */
 static void s_timer_fn(void *unused);
 static void vcpu_periodic_timer_fn(void *data);
@@ -2149,7 +2152,7 @@ static int cpu_schedule_up(unsigned int cpu)
 
     sd->scheduler = &ops;
     spin_lock_init(&sd->_lock);
-    sd->schedule_lock = &sd->_lock;
+    sd->schedule_lock = &sched_free_cpu_lock;
     init_timer(&sd->s_timer, s_timer_fn, NULL, cpu);
     atomic_set(&sd->urgent_count, 0);
 
@@ -2488,7 +2491,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
      * taking it, finds all the initializations we've done above in place.
      */
     smp_mb();
-    sd->schedule_lock = new_lock;
+    sd->schedule_lock = c ? new_lock : &sched_free_cpu_lock;
 
     /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
     spin_unlock_irq(old_lock);
