@@ -381,8 +381,9 @@ static void vcpu_deassign(struct null_private *prv, struct vcpu *v,
 }
 
 /* Change the scheduler of cpu to us (null). */
-static void null_switch_sched(struct scheduler *new_ops, unsigned int cpu,
-                              void *pdata, void *vdata)
+static spinlock_t *null_switch_sched(struct scheduler *new_ops,
+                                     unsigned int cpu,
+                                     void *pdata, void *vdata)
 {
     struct schedule_data *sd = &per_cpu(schedule_data, cpu);
     struct null_private *prv = null_priv(new_ops);
@@ -401,16 +402,7 @@ static void null_switch_sched(struct scheduler *new_ops, unsigned int cpu,
 
     init_pdata(prv, cpu);
 
-    per_cpu(scheduler, cpu) = new_ops;
-    per_cpu(schedule_data, cpu).sched_priv = pdata;
-
-    /*
-     * (Re?)route the lock to the per pCPU lock as /last/ thing. In fact,
-     * if it is free (and it can be) we want that anyone that manages
-     * taking it, finds all the initializations we've done above in place.
-     */
-    smp_mb();
-    sd->schedule_lock = &sd->_lock;
+    return &sd->_lock;
 }
 
 static void null_vcpu_insert(const struct scheduler *ops, struct vcpu *v)
