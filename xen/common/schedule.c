@@ -83,15 +83,6 @@ extern const struct scheduler *__start_schedulers_array[], *__end_schedulers_arr
 
 static struct scheduler __read_mostly ops;
 
-static spinlock_t *
-sched_idle_switch_sched(struct scheduler *new_ops, unsigned int cpu,
-                        void *pdata, void *vdata)
-{
-    sched_idle_unit(cpu)->priv = NULL;
-
-    return &sched_free_cpu_lock;
-}
-
 static struct sched_resource *
 sched_idle_res_pick(const struct scheduler *ops, struct sched_unit *unit)
 {
@@ -131,7 +122,6 @@ static struct scheduler sched_idle_ops = {
 
     .alloc_vdata    = sched_idle_alloc_vdata,
     .free_vdata     = sched_idle_free_vdata,
-    .switch_sched   = sched_idle_switch_sched,
 };
 
 static inline struct vcpu *unit2vcpu_cpu(struct sched_unit *unit,
@@ -2407,36 +2397,22 @@ void __init scheduler_init(void)
 }
 
 /*
- * Move a pCPU outside of the influence of the scheduler of its current
- * cpupool, or subject it to the scheduler of a new cpupool.
- *
- * For the pCPUs that are removed from their cpupool, their scheduler becomes
- * &sched_idle_ops (the idle scheduler).
+ * Move a pCPU from free cpus (running the idle scheduler) to a cpupool
+ * using any "real" scheduler.
+ * The cpu is still marked as "free" and not yet valid for its cpupool.
  */
-int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
+int schedule_cpu_add(unsigned int cpu, struct cpupool *c)
 {
     struct vcpu *idle;
-    void *ppriv, *ppriv_old, *vpriv, *vpriv_old;
-    struct scheduler *old_ops = get_sched_res(cpu)->scheduler;
-    struct scheduler *new_ops = (c == NULL) ? &sched_idle_ops : c->sched;
+    void *ppriv, *vpriv;
+    struct scheduler *new_ops = c->sched;
     struct sched_resource *sd = get_sched_res(cpu);
-    struct cpupool *old_pool = sd->cpupool;
     spinlock_t *old_lock, *new_lock;
     unsigned long flags;
 
-    /*
-     * pCPUs only move from a valid cpupool to free (i.e., out of any pool),
-     * or from free to a valid cpupool. In the former case (which happens when
-     * c is NULL), we want the CPU to have been marked as free already, as
-     * well as to not be valid for the source pool any longer, when we get to
-     * here. In the latter case (which happens when c is a valid cpupool), we
-     * want the CPU to still be marked as free, as well as to not yet be valid
-     * for the destination pool.
-     */
-    ASSERT(c != old_pool && (c != NULL || old_pool != NULL));
     ASSERT(cpumask_test_cpu(cpu, &cpupool_free_cpus));
-    ASSERT((c == NULL && !cpumask_test_cpu(cpu, old_pool->cpu_valid)) ||
-           (c != NULL && !cpumask_test_cpu(cpu, c->cpu_valid)));
+    ASSERT(!cpumask_test_cpu(cpu, c->cpu_valid));
+    ASSERT(get_sched_res(cpu)->cpupool == NULL);
 
     /*
      * To setup the cpu for the new scheduler we need:
@@ -2461,52 +2437,91 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
         return -ENOMEM;
     }
 
-    sched_do_tick_suspend(old_ops, cpu);
-
     /*
-     * The actual switch, including (if necessary) the rerouting of the
-     * scheduler lock to whatever new_ops prefers,  needs to happen in one
-     * critical section, protected by old_ops' lock, or races are possible.
-     * It is, in fact, the lock of another scheduler that we are taking (the
-     * scheduler of the cpupool that cpu still belongs to). But that is ok
-     * as, anyone trying to schedule on this cpu will spin until when we
-     * release that lock (bottom of this function). When he'll get the lock
-     * --thanks to the loop inside *_schedule_lock() functions-- he'll notice
-     * that the lock itself changed, and retry acquiring the new one (which
-     * will be the correct, remapped one, at that point).
+     * The actual switch, including the rerouting of the scheduler lock to
+     * whatever new_ops prefers, needs to happen in one critical section,
+     * protected by old_ops' lock, or races are possible.
+     * It is, in fact, the lock of the idle scheduler that we are taking.
+     * But that is ok as anyone trying to schedule on this cpu will spin until
+     * when we release that lock (bottom of this function). When he'll get the
+     * lock --thanks to the loop inside *_schedule_lock() functions-- he'll
+     * notice that the lock itself changed, and retry acquiring the new one
+     * (which will be the correct, remapped one, at that point).
      */
     old_lock = pcpu_schedule_lock_irqsave(cpu, &flags);
 
-    vpriv_old = idle->sched_unit->priv;
-    ppriv_old = sd->sched_priv;
     new_lock = sched_switch_sched(new_ops, cpu, ppriv, vpriv);
 
     sd->scheduler = new_ops;
     sd->sched_priv = ppriv;
 
     /*
-     * (Re?)route the lock to the per pCPU lock as /last/ thing. In fact,
+     * Reroute the lock to the per pCPU lock as /last/ thing. In fact,
      * if it is free (and it can be) we want that anyone that manages
      * taking it, finds all the initializations we've done above in place.
      */
     smp_mb();
     sd->schedule_lock = new_lock;
 
-    /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
+    /* _Not_ pcpu_schedule_unlock(): schedule_lock has changed! */
     spin_unlock_irqrestore(old_lock, flags);
 
     sched_do_tick_resume(new_ops, cpu);
+
+    sd->granularity = c->granularity;
+    sd->cpupool = c;
+    /* The  cpu is added to a pool, trigger it to go pick up some work */
+    cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
+
+    return 0;
+}
+
+/*
+ * Remove a pCPU from its cpupool. Its scheduler becomes &sched_idle_ops
+ * (the idle scheduler).
+ * The cpu is already marked as "free" and not valid any longer for its
+ * cpupool.
+ */
+int schedule_cpu_rm(unsigned int cpu)
+{
+    struct vcpu *idle;
+    void *ppriv_old, *vpriv_old;
+    struct sched_resource *sd = get_sched_res(cpu);
+    struct scheduler *old_ops = sd->scheduler;
+    spinlock_t *old_lock;
+    unsigned long flags;
+
+    ASSERT(sd->cpupool != NULL);
+    ASSERT(cpumask_test_cpu(cpu, &cpupool_free_cpus));
+    ASSERT(!cpumask_test_cpu(cpu, sd->cpupool->cpu_valid));
+
+    idle = idle_vcpu[cpu];
+
+    sched_do_tick_suspend(old_ops, cpu);
+
+    /* See comment in schedule_cpu_add() regarding lock switching. */
+    old_lock = pcpu_schedule_lock_irqsave(cpu, &flags);
+
+    vpriv_old = idle->sched_unit->priv;
+    ppriv_old = sd->sched_priv;
+
+    idle->sched_unit->priv = NULL;
+    sd->scheduler = &sched_idle_ops;
+    sd->sched_priv = NULL;
+
+    smp_mb();
+    sd->schedule_lock = &sched_free_cpu_lock;
+
+    /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
+    spin_unlock_irqrestore(old_lock, flags);
 
     sched_deinit_pdata(old_ops, ppriv_old, cpu);
 
     sched_free_vdata(old_ops, vpriv_old);
     sched_free_pdata(old_ops, ppriv_old, cpu);
 
-    get_sched_res(cpu)->granularity = c ? c->granularity : 1;
-    get_sched_res(cpu)->cpupool = c;
-    /* When a cpu is added to a pool, trigger it to go pick up some work */
-    if ( c != NULL )
-        cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
+    sd->granularity = 1;
+    sd->cpupool = NULL;
 
     return 0;
 }
