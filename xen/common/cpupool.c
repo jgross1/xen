@@ -510,8 +510,10 @@ static int cpupool_cpu_add(unsigned int cpu)
      * (or unplugging would have failed) and that is the default behavior
      * anyway.
      */
+    rcu_read_lock(&sched_res_rculock);
     get_sched_res(cpu)->cpupool = NULL;
     ret = cpupool_assign_cpu_locked(cpupool0, cpu);
+    rcu_read_unlock(&sched_res_rculock);
 
     spin_unlock(&cpupool_lock);
 
@@ -596,7 +598,9 @@ static void cpupool_cpu_remove_forced(unsigned int cpu)
         }
     }
 
+    rcu_read_lock(&sched_res_rculock);
     sched_rm_cpu(cpu);
+    rcu_read_unlock(&sched_res_rculock);
 }
 
 /*
