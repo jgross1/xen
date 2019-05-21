@@ -83,6 +83,57 @@ extern const struct scheduler *__start_schedulers_array[], *__end_schedulers_arr
 
 static struct scheduler __read_mostly ops;
 
+static spinlock_t *
+sched_idle_switch_sched(struct scheduler *new_ops, unsigned int cpu,
+                        void *pdata, void *vdata)
+{
+    sched_idle_unit(cpu)->priv = NULL;
+
+    return &sched_free_cpu_lock;
+}
+
+static struct sched_resource *
+sched_idle_res_pick(const struct scheduler *ops, struct sched_unit *unit)
+{
+    return unit->res;
+}
+
+static void *
+sched_idle_alloc_vdata(const struct scheduler *ops, struct sched_unit *unit,
+                       void *dd)
+{
+    /* Any non-NULL pointer is fine here. */
+    return (void *)1UL;
+}
+
+static void
+sched_idle_free_vdata(const struct scheduler *ops, void *priv)
+{
+}
+
+static void sched_idle_schedule(
+    const struct scheduler *ops, struct sched_unit *unit, s_time_t now,
+    bool tasklet_work_scheduled)
+{
+    const unsigned int cpu = smp_processor_id();
+
+    unit->next_time = -1;
+    unit->next_task = sched_idle_unit(sched_get_resource_cpu(cpu));
+}
+
+static struct scheduler sched_idle_ops = {
+    .name           = "Idle Scheduler",
+    .opt_name       = "idle",
+    .sched_data     = NULL,
+
+    .pick_resource  = sched_idle_res_pick,
+    .do_schedule    = sched_idle_schedule,
+
+    .alloc_vdata    = sched_idle_alloc_vdata,
+    .free_vdata     = sched_idle_free_vdata,
+    .switch_sched   = sched_idle_switch_sched,
+};
+
 static inline struct vcpu *unit2vcpu_cpu(struct sched_unit *unit,
                                          unsigned int cpu)
 {
@@ -2140,7 +2191,6 @@ static void poll_timer_fn(void *data)
 static int cpu_schedule_up(unsigned int cpu)
 {
     struct sched_resource *sd;
-    void *sched_priv;
 
     sd = xzalloc(struct sched_resource);
     if ( sd == NULL )
@@ -2149,7 +2199,7 @@ static int cpu_schedule_up(unsigned int cpu)
     sd->cpus = cpumask_of(cpu);
     set_sched_res(cpu, sd);
 
-    sd->scheduler = &ops;
+    sd->scheduler = &sched_idle_ops;
     spin_lock_init(&sd->_lock);
     sd->schedule_lock = &sched_free_cpu_lock;
     init_timer(&sd->s_timer, s_timer_fn, NULL, cpu);
@@ -2170,20 +2220,10 @@ static int cpu_schedule_up(unsigned int cpu)
         struct sched_unit *unit = idle->sched_unit;
 
         /*
-         * During (ACPI?) suspend the idle vCPU for this pCPU is not freed,
-         * while its scheduler specific data (what is pointed by sched_priv)
-         * is. Also, at this stage of the resume path, we attach the pCPU
-         * to the default scheduler, no matter in what cpupool it was before
-         * suspend. To avoid inconsistency, let's allocate default scheduler
-         * data for the idle vCPU here. If the pCPU was in a different pool
-         * with a different scheduler, it is schedule_cpu_switch(), invoked
-         * later, that will set things up as appropriate.
+         * No need to allocate any scheduler data, as cpus coming online are
+         * free initially and the idle scheduler doesn't need any data areas
+         * allocated.
          */
-        ASSERT(unit->priv == NULL);
-
-        unit->priv = sched_alloc_vdata(&ops, unit, idle->domain->sched_priv);
-        if ( unit->priv == NULL )
-            return -ENOMEM;
 
         /* Update the resource pointer in the idle unit. */
         unit->res = sd;
@@ -2194,16 +2234,7 @@ static int cpu_schedule_up(unsigned int cpu)
     sd->curr = idle_vcpu[cpu]->sched_unit;
     sd->sched_unit_idle = idle_vcpu[cpu]->sched_unit;
 
-    /*
-     * We don't want to risk calling xfree() on an sd->sched_priv
-     * (e.g., inside free_pdata, from cpu_schedule_down() called
-     * during CPU_UP_CANCELLED) that contains an IS_ERR value.
-     */
-    sched_priv = sched_alloc_pdata(&ops, cpu);
-    if ( IS_ERR(sched_priv) )
-        return PTR_ERR(sched_priv);
-
-    sd->sched_priv = sched_priv;
+    sd->sched_priv = NULL;
 
     return 0;
 }
@@ -2211,13 +2242,6 @@ static int cpu_schedule_up(unsigned int cpu)
 static void cpu_schedule_down(unsigned int cpu)
 {
     struct sched_resource *sd = get_sched_res(cpu);
-    struct scheduler *sched = sd->scheduler;
-
-    sched_free_pdata(sched, sd->sched_priv, cpu);
-    sched_free_vdata(sched, idle_vcpu[cpu]->sched_unit->priv);
-
-    idle_vcpu[cpu]->sched_unit->priv = NULL;
-    sd->sched_priv = NULL;
 
     kill_timer(&sd->s_timer);
 
@@ -2225,26 +2249,14 @@ static void cpu_schedule_down(unsigned int cpu)
     xfree(sd);
 }
 
-void scheduler_percpu_init(unsigned int cpu)
-{
-    struct sched_resource *sd = get_sched_res(cpu);
-    struct scheduler *sched = sd->scheduler;
-
-    if ( system_state != SYS_STATE_resume )
-        sched_init_pdata(sched, sd->sched_priv, cpu);
-}
-
 void sched_rm_cpu(unsigned int cpu)
 {
     int rc;
-    struct sched_resource *sd = get_sched_res(cpu);
-    struct scheduler *sched = sd->scheduler;
 
     rcu_read_lock(&domlist_read_lock);
     rc = cpu_disable_scheduler(cpu);
     BUG_ON(rc);
     rcu_read_unlock(&domlist_read_lock);
-    sched_deinit_pdata(sched, sd->sched_priv, cpu);
     cpu_schedule_down(cpu);
 }
 
@@ -2259,32 +2271,22 @@ static int cpu_schedule_callback(
      * allocating and initializing the per-pCPU scheduler specific data,
      * as well as "registering" this pCPU to the scheduler (which may
      * involve modifying some scheduler wide data structures).
-     * This happens by calling the alloc_pdata and init_pdata hooks, in
-     * this order. A scheduler that does not need to allocate any per-pCPU
-     * data can avoid implementing alloc_pdata. init_pdata may, however, be
-     * necessary/useful in this case too (e.g., it can contain the "register
-     * the pCPU to the scheduler" part). alloc_pdata (if present) is called
-     * during CPU_UP_PREPARE. init_pdata (if present) is called before
-     * CPU_STARTING in scheduler_percpu_init().
+     * As new pCPUs always start as "free" cpus with the minimal idle
+     * scheduler being in charge, we don't need any of that.
      *
      * On the other hand, at teardown, we need to reverse what has been done
-     * during initialization, and then free the per-pCPU specific data. This
-     * happens by calling the deinit_pdata and free_pdata hooks, in this
+     * during initialization, and then free the per-pCPU specific data. A
+     * pCPU brought down is not forced through "free" cpus, so here we need to
+     * use the appropriate hooks.
+     *
+     * This happens by calling the deinit_pdata and free_pdata hooks, in this
      * order. If no per-pCPU memory was allocated, there is no need to
      * provide an implementation of free_pdata. deinit_pdata may, however,
      * be necessary/useful in this case too (e.g., it can undo something done
      * on scheduler wide data structure during init_pdata). Both deinit_pdata
      * and free_pdata are called during CPU_DEAD.
      *
-     * If someting goes wrong during bringup, we go to CPU_UP_CANCELLED
-     * *before* having called init_pdata. In this case, as there is no
-     * initialization needing undoing, only free_pdata should be called.
-     * This means it is possible to call free_pdata just after alloc_pdata,
-     * without a init_pdata/deinit_pdata "cycle" in between the two.
-     *
-     * So, in summary, the usage pattern should look either
-     *  - alloc_pdata-->init_pdata-->deinit_pdata-->free_pdata, or
-     *  - alloc_pdata-->free_pdata.
+     * If someting goes wrong during bringup, we go to CPU_UP_CANCELLED.
      */
     switch ( action )
     {
@@ -2401,9 +2403,6 @@ void __init scheduler_init(void)
         BUG();
     get_sched_res(0)->curr = idle_vcpu[0]->sched_unit;
     get_sched_res(0)->sched_unit_idle = idle_vcpu[0]->sched_unit;
-    get_sched_res(0)->sched_priv = sched_alloc_pdata(&ops, 0);
-    BUG_ON(IS_ERR(get_sched_res(0)->sched_priv));
-    scheduler_percpu_init(0);
 }
 
 /*
@@ -2411,18 +2410,14 @@ void __init scheduler_init(void)
  * cpupool, or subject it to the scheduler of a new cpupool.
  *
  * For the pCPUs that are removed from their cpupool, their scheduler becomes
- * &ops (the default scheduler, selected at boot, which also services the
- * default cpupool). However, as these pCPUs are not really part of any pool,
- * there won't be any scheduling event on them, not even from the default
- * scheduler. Basically, they will just sit idle until they are explicitly
- * added back to a cpupool.
+ * &sched_idle_ops (the idle scheduler).
  */
 int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
 {
     struct vcpu *idle;
     void *ppriv, *ppriv_old, *vpriv, *vpriv_old;
     struct scheduler *old_ops = get_sched_res(cpu)->scheduler;
-    struct scheduler *new_ops = (c == NULL) ? &ops : c->sched;
+    struct scheduler *new_ops = (c == NULL) ? &sched_idle_ops : c->sched;
     struct sched_resource *sd = get_sched_res(cpu);
     struct cpupool *old_pool = sd->cpupool;
     spinlock_t *old_lock, *new_lock;
@@ -2441,9 +2436,6 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
     ASSERT(cpumask_test_cpu(cpu, &cpupool_free_cpus));
     ASSERT((c == NULL && !cpumask_test_cpu(cpu, old_pool->cpu_valid)) ||
            (c != NULL && !cpumask_test_cpu(cpu, c->cpu_valid)));
-
-    if ( old_ops == new_ops )
-        goto out;
 
     /*
      * To setup the cpu for the new scheduler we need:
@@ -2497,7 +2489,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
      * and must observe all prior initialisation.
      */
     smp_wmb();
-    sd->schedule_lock = c ? new_lock : &sched_free_cpu_lock;
+    sd->schedule_lock = new_lock;
 
     /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
     spin_unlock_irqrestore(old_lock, flags);
@@ -2509,7 +2501,6 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
     sched_free_vdata(old_ops, vpriv_old);
     sched_free_pdata(old_ops, ppriv_old, cpu);
 
- out:
     get_sched_res(cpu)->granularity = c ? c->granularity : 1;
     get_sched_res(cpu)->cpupool = c;
     /* When a cpu is added to a pool, trigger it to go pick up some work */
