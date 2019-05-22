@@ -2235,12 +2235,24 @@ void scheduler_percpu_init(unsigned int cpu)
         sched_init_pdata(sched, sd->sched_priv, cpu);
 }
 
+void sched_rm_cpu(unsigned int cpu)
+{
+    int rc;
+    struct sched_resource *sd = get_sched_res(cpu);
+    struct scheduler *sched = sd->scheduler;
+
+    rcu_read_lock(&domlist_read_lock);
+    rc = cpu_disable_scheduler(cpu);
+    BUG_ON(rc);
+    rcu_read_unlock(&domlist_read_lock);
+    sched_deinit_pdata(sched, sd->sched_priv, cpu);
+    cpu_schedule_down(cpu);
+}
+
 static int cpu_schedule_callback(
     struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
     unsigned int cpu = (unsigned long)hcpu;
-    struct sched_resource *sd = get_sched_res(cpu);
-    struct scheduler *sched = sd->scheduler;
     int rc = 0;
 
     /*
@@ -2286,16 +2298,10 @@ static int cpu_schedule_callback(
         rc = cpu_disable_scheduler_check(cpu);
         rcu_read_unlock(&domlist_read_lock);
         break;
-    case CPU_RESUME_FAILED:
     case CPU_DEAD:
         if ( system_state == SYS_STATE_suspend )
             break;
-        rcu_read_lock(&domlist_read_lock);
-        rc = cpu_disable_scheduler(cpu);
-        BUG_ON(rc);
-        rcu_read_unlock(&domlist_read_lock);
-        sched_deinit_pdata(sched, sd->sched_priv, cpu);
-        cpu_schedule_down(cpu);
+        sched_rm_cpu(cpu);
         break;
     case CPU_UP_CANCELED:
         if ( system_state != SYS_STATE_resume )
@@ -2421,6 +2427,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
     struct sched_resource *sd = get_sched_res(cpu);
     struct cpupool *old_pool = sd->cpupool;
     spinlock_t *old_lock, *new_lock;
+    unsigned long flags;
 
     /*
      * pCPUs only move from a valid cpupool to free (i.e., out of any pool),
@@ -2476,7 +2483,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
      * that the lock itself changed, and retry acquiring the new one (which
      * will be the correct, remapped one, at that point).
      */
-    old_lock = pcpu_schedule_lock_irq(cpu);
+    old_lock = pcpu_schedule_lock_irqsave(cpu, &flags);
 
     vpriv_old = idle->sched_unit->priv;
     ppriv_old = sd->sched_priv;
@@ -2494,7 +2501,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
     sd->schedule_lock = c ? new_lock : &sched_free_cpu_lock;
 
     /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
-    spin_unlock_irq(old_lock);
+    spin_unlock_irqrestore(old_lock, flags);
 
     sched_do_tick_resume(new_ops, cpu);
 
