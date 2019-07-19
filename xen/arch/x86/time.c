@@ -1522,6 +1522,8 @@ static void time_calibration_std_rendezvous(void *_r)
     struct calibration_rendezvous *r = _r;
     unsigned int total_cpus = cpumask_weight(&r->cpu_calibration_map);
 
+    debugtrace_printk("time enter, total=%u\n", total_cpus);
+
     if ( smp_processor_id() == 0 )
     {
         while ( atomic_read(&r->semaphore) != (total_cpus - 1) )
@@ -1539,6 +1541,8 @@ static void time_calibration_std_rendezvous(void *_r)
     }
 
     time_calibration_rendezvous_tail(r);
+
+    debugtrace_printk("time exit\n");
 }
 
 /*
@@ -1575,10 +1579,15 @@ static void time_calibration(void *unused)
 
     cpumask_copy(&r.cpu_calibration_map, &cpu_online_map);
 
+    debugtrace_printk("time_calibration start %*pb\n",
+                      CPUMASK_PR(&r.cpu_calibration_map));
+
     /* @wait=1 because we must wait for all cpus before freeing @r. */
     on_selected_cpus(&r.cpu_calibration_map,
                      time_calibration_rendezvous_fn,
                      &r, 1);
+
+    debugtrace_printk("time_calibration end \n");
 }
 
 static struct cpu_time_stamp ap_bringup_ref;
