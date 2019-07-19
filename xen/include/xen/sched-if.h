@@ -110,6 +110,11 @@ static inline struct sched_unit *sched_idle_unit(unsigned int cpu)
     return idle_vcpu[cpu]->sched_unit;
 }
 
+static inline unsigned int sched_get_resource_cpu(unsigned int cpu)
+{
+    return get_sched_res(cpu)->processor;
+}
+
 /*
  * Scratch space, for avoiding having too many cpumask_t on the stack.
  * Within each scheduler, when using the scratch mask of one pCPU:
