@@ -88,6 +88,11 @@ static inline bool unit_runnable(const struct sched_unit *unit)
     return false;
 }
 
+static inline int vcpu_runstate_blocked(struct vcpu *v)
+{
+    return (v->pause_flags & VPF_blocked) ? RUNSTATE_blocked : RUNSTATE_offline;
+}
+
 static inline bool unit_runnable_state(const struct sched_unit *unit)
 {
     struct vcpu *v;
@@ -100,9 +105,7 @@ static inline bool unit_runnable_state(const struct sched_unit *unit)
     {
         runnable = vcpu_runnable(v);
 
-        v->new_state = runnable ? RUNSTATE_running
-                                : (v->pause_flags & VPF_blocked)
-                                  ? RUNSTATE_blocked : RUNSTATE_offline;
+        v->new_state = runnable ? RUNSTATE_running : vcpu_runstate_blocked(v);
 
         if ( runnable )
             ret = true;
