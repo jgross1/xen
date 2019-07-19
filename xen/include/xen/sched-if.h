@@ -22,6 +22,8 @@ extern cpumask_t cpupool_free_cpus;
 #define SCHED_DEFAULT_RATELIMIT_US 1000
 extern int sched_ratelimit_us;
 
+/* Scheduling resource mask. */
+extern const cpumask_t *sched_res_mask;
 
 /*
  * In order to allow a scheduler to remap the lock->cpu mapping,
@@ -509,6 +511,7 @@ struct cpupool
     int              cpupool_id;
     unsigned int     n_dom;
     cpumask_var_t    cpu_valid;      /* all cpus assigned to pool */
+    cpumask_var_t    res_valid;      /* all scheduling resources of pool */
     struct cpupool   *next;
     struct scheduler *sched;
     atomic_t         refcnt;
@@ -524,7 +527,7 @@ static inline cpumask_t* cpupool_domain_cpumask(const struct domain *d)
      * be interested in calling this for the idle domain.
      */
     ASSERT(d->cpupool != NULL);
-    return d->cpupool->cpu_valid;
+    return d->cpupool->res_valid;
 }
 
 /*
