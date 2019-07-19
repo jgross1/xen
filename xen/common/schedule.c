@@ -269,8 +269,8 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     init_timer(&v->poll_timer, poll_timer_fn,
                v, v->processor);
 
-    v->sched_priv = sched_alloc_vdata(dom_scheduler(d), unit, d->sched_priv);
-    if ( v->sched_priv == NULL )
+    unit->priv = sched_alloc_vdata(dom_scheduler(d), unit, d->sched_priv);
+    if ( unit->priv == NULL )
     {
         v->sched_unit = NULL;
         xfree(unit);
@@ -365,7 +365,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
     {
         spinlock_t *lock;
 
-        vcpudata = v->sched_priv;
+        vcpudata = v->sched_unit->priv;
 
         migrate_timer(&v->periodic_timer, new_p);
         migrate_timer(&v->singleshot_timer, new_p);
@@ -383,7 +383,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
          */
         spin_unlock_irq(lock);
 
-        v->sched_priv = vcpu_priv[v->vcpu_id];
+        v->sched_unit->priv = vcpu_priv[v->vcpu_id];
         if ( !d->is_dying )
             sched_move_irqs(v);
 
@@ -415,7 +415,7 @@ void sched_destroy_vcpu(struct vcpu *v)
     if ( test_and_clear_bool(v->is_urgent) )
         atomic_dec(&per_cpu(schedule_data, v->processor).urgent_count);
     sched_remove_unit(vcpu_scheduler(v), unit);
-    sched_free_vdata(vcpu_scheduler(v), v->sched_priv);
+    sched_free_vdata(vcpu_scheduler(v), unit->priv);
     xfree(unit);
     v->sched_unit = NULL;
 }
@@ -1593,6 +1593,7 @@ static int cpu_schedule_up(unsigned int cpu)
     else
     {
         struct vcpu *idle = idle_vcpu[cpu];
+        struct sched_unit *unit = idle->sched_unit;
 
         /*
          * During (ACPI?) suspend the idle vCPU for this pCPU is not freed,
@@ -1604,11 +1605,10 @@ static int cpu_schedule_up(unsigned int cpu)
          * with a different scheduler, it is schedule_cpu_switch(), invoked
          * later, that will set things up as appropriate.
          */
-        ASSERT(idle->sched_priv == NULL);
+        ASSERT(unit->priv == NULL);
 
-        idle->sched_priv = sched_alloc_vdata(&ops, idle->sched_unit,
-                                             idle->domain->sched_priv);
-        if ( idle->sched_priv == NULL )
+        unit->priv = sched_alloc_vdata(&ops, unit, idle->domain->sched_priv);
+        if ( unit->priv == NULL )
             return -ENOMEM;
     }
     if ( idle_vcpu[cpu] == NULL )
@@ -1634,9 +1634,9 @@ static void cpu_schedule_down(unsigned int cpu)
     struct scheduler *sched = per_cpu(scheduler, cpu);
 
     sched_free_pdata(sched, sd->sched_priv, cpu);
-    sched_free_vdata(sched, idle_vcpu[cpu]->sched_priv);
+    sched_free_vdata(sched, idle_vcpu[cpu]->sched_unit->priv);
 
-    idle_vcpu[cpu]->sched_priv = NULL;
+    idle_vcpu[cpu]->sched_unit->priv = NULL;
     sd->sched_priv = NULL;
 
     kill_timer(&sd->s_timer);
@@ -1886,7 +1886,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
      */
     old_lock = pcpu_schedule_lock_irq(cpu);
 
-    vpriv_old = idle->sched_priv;
+    vpriv_old = idle->sched_unit->priv;
     ppriv_old = sd->sched_priv;
     new_lock = sched_switch_sched(new_ops, cpu, ppriv, vpriv);
 
