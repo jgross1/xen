@@ -863,15 +863,16 @@ _csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc, bool_t commit)
 }
 
 static int
-csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc)
+csched_cpu_pick(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu *svc = CSCHED_VCPU(vc);
 
     /*
      * We have been called by vcpu_migrate() (in schedule.c), as part
      * of the process of seeing if vc can be migrated to another pcpu.
      * We make a note about this in svc->flags so that later, in
-     * csched_vcpu_wake() (still called from vcpu_migrate()) we won't
+     * csched_unit_wake() (still called from vcpu_migrate()) we won't
      * get boosted, which we don't deserve as we are "only" migrating.
      */
     set_bit(CSCHED_FLAG_VCPU_MIGRATING, &svc->flags);
@@ -999,8 +1000,10 @@ csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
 }
 
 static void *
-csched_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
+csched_alloc_vdata(const struct scheduler *ops, struct sched_unit *unit,
+                   void *dd)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu *svc;
 
     /* Allocate per-VCPU info */
@@ -1020,8 +1023,9 @@ csched_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 }
 
 static void
-csched_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
+csched_unit_insert(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu *svc = vc->sched_priv;
     spinlock_t *lock;
 
@@ -1030,7 +1034,7 @@ csched_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     /* csched_cpu_pick() looks in vc->processor's runq, so we need the lock. */
     lock = vcpu_schedule_lock_irq(vc);
 
-    vc->processor = csched_cpu_pick(ops, vc);
+    vc->processor = csched_cpu_pick(ops, unit);
 
     spin_unlock_irq(lock);
 
@@ -1055,9 +1059,10 @@ csched_free_vdata(const struct scheduler *ops, void *priv)
 }
 
 static void
-csched_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
+csched_unit_remove(const struct scheduler *ops, struct sched_unit *unit)
 {
     struct csched_private *prv = CSCHED_PRIV(ops);
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
     struct csched_dom * const sdom = svc->sdom;
 
@@ -1082,8 +1087,9 @@ csched_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
 }
 
 static void
-csched_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
+csched_unit_sleep(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
     unsigned int cpu = vc->processor;
 
@@ -1106,8 +1112,9 @@ csched_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
 }
 
 static void
-csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
+csched_unit_wake(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
     bool_t migrating;
 
@@ -1167,8 +1174,9 @@ csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
 }
 
 static void
-csched_vcpu_yield(const struct scheduler *ops, struct vcpu *vc)
+csched_unit_yield(const struct scheduler *ops, struct sched_unit *unit)
 {
+    struct vcpu *vc = unit->vcpu;
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
 
     /* Let the scheduler know that this vcpu is trying to yield */
@@ -1221,9 +1229,10 @@ csched_dom_cntl(
 }
 
 static void
-csched_aff_cntl(const struct scheduler *ops, struct vcpu *v,
+csched_aff_cntl(const struct scheduler *ops, struct sched_unit *unit,
                 const cpumask_t *hard, const cpumask_t *soft)
 {
+    struct vcpu *v = unit->vcpu;
     struct csched_vcpu *svc = CSCHED_VCPU(v);
 
     if ( !hard )
@@ -1752,7 +1761,7 @@ csched_load_balance(struct csched_private *prv, int cpu,
                  * - if we race with inc_nr_runnable(), we skip a pCPU that may
                  *   have runnable vCPUs in its runqueue, but that's not a
                  *   problem because:
-                 *   + if racing with csched_vcpu_insert() or csched_vcpu_wake(),
+                 *   + if racing with csched_unit_insert() or csched_unit_wake(),
                  *     __runq_tickle() will be called afterwords, so the vCPU
                  *     won't get stuck in the runqueue for too long;
                  *   + if racing with csched_runq_steal(), it may be that a
@@ -2265,12 +2274,12 @@ static const struct scheduler sched_credit_def = {
 
     .global_init    = csched_global_init,
 
-    .insert_vcpu    = csched_vcpu_insert,
-    .remove_vcpu    = csched_vcpu_remove,
+    .insert_unit    = csched_unit_insert,
+    .remove_unit    = csched_unit_remove,
 
-    .sleep          = csched_vcpu_sleep,
-    .wake           = csched_vcpu_wake,
-    .yield          = csched_vcpu_yield,
+    .sleep          = csched_unit_sleep,
+    .wake           = csched_unit_wake,
+    .yield          = csched_unit_yield,
 
     .adjust         = csched_dom_cntl,
     .adjust_affinity= csched_aff_cntl,
