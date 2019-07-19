@@ -316,7 +316,7 @@ pick_res(struct null_private *prv, struct sched_unit *unit)
      * all the pCPUs are busy.
      *
      * In fact, there must always be something sane in v->processor, or
-     * vcpu_schedule_lock() and friends won't work. This is not a problem,
+     * unit_schedule_lock() and friends won't work. This is not a problem,
      * as we will actually assign the vCPU to the pCPU we return from here,
      * only if the pCPU is free.
      */
@@ -419,7 +419,7 @@ static void null_unit_insert(const struct scheduler *ops,
 
     ASSERT(!is_idle_vcpu(v));
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = unit_schedule_lock_irq(unit);
  retry:
 
     unit->res = pick_res(prv, unit);
@@ -427,7 +427,7 @@ static void null_unit_insert(const struct scheduler *ops,
 
     spin_unlock(lock);
 
-    lock = vcpu_schedule_lock(v);
+    lock = unit_schedule_lock(unit);
 
     cpumask_and(cpumask_scratch_cpu(cpu), v->cpu_hard_affinity,
                 cpupool_domain_cpumask(v->domain));
@@ -513,7 +513,7 @@ static void null_unit_remove(const struct scheduler *ops,
 
     ASSERT(!is_idle_vcpu(v));
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = unit_schedule_lock_irq(unit);
 
     /* If v is in waitqueue, just get it out of there and bail */
     if ( unlikely(!list_empty(&nvc->waitq_elem)) )
@@ -531,7 +531,7 @@ static void null_unit_remove(const struct scheduler *ops,
     _vcpu_remove(prv, v);
 
  out:
-    vcpu_schedule_unlock_irq(lock, v);
+    unit_schedule_unlock_irq(lock, unit);
 
     SCHED_STAT_CRANK(vcpu_remove);
 }
@@ -851,13 +851,13 @@ static void null_dump(const struct scheduler *ops)
             struct null_unit * const nvc = null_unit(v->sched_unit);
             spinlock_t *lock;
 
-            lock = vcpu_schedule_lock(nvc->vcpu);
+            lock = unit_schedule_lock(nvc->vcpu->sched_unit);
 
             printk("\t%3d: ", ++loop);
             dump_vcpu(prv, nvc);
             printk("\n");
 
-            vcpu_schedule_unlock(lock, nvc->vcpu);
+            unit_schedule_unlock(lock, nvc->vcpu->sched_unit);
         }
     }
 
