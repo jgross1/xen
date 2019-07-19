@@ -317,12 +317,11 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     struct domain *d = v->domain;
     struct sched_unit *unit;
 
-    v->processor = processor;
-
     if ( (unit = sched_alloc_unit(v)) == NULL )
         return 1;
 
-    unit->res = get_sched_res(processor);
+    sched_set_res(unit, get_sched_res(processor));
+
     /* Initialise the per-vcpu timers. */
     init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
                v, v->processor);
@@ -436,8 +435,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
 
         sched_set_affinity(v, &cpumask_all, &cpumask_all);
 
-        v->processor = new_p;
-        v->sched_unit->res = get_sched_res(new_p);
+        sched_set_res(v->sched_unit, get_sched_res(new_p));
         /*
          * With v->processor modified we must not
          * - make any further changes assuming we hold the scheduler lock,
@@ -775,8 +773,9 @@ void restore_vcpu_affinity(struct domain *d)
         spinlock_t *lock;
         unsigned int old_cpu = v->processor;
         struct sched_unit *unit = v->sched_unit;
+        struct sched_resource *res;
 
-        ASSERT(!vcpu_runnable(v));
+        ASSERT(!unit_runnable(unit));
 
         /*
          * Re-assign the initial processor as after resume we have no
@@ -807,12 +806,12 @@ void restore_vcpu_affinity(struct domain *d)
             }
         }
 
-        v->processor = cpumask_any(cpumask_scratch_cpu(cpu));
-        unit->res = get_sched_res(v->processor);
+        res = get_sched_res(cpumask_any(cpumask_scratch_cpu(cpu)));
+        sched_set_res(unit, res);
 
         lock = unit_schedule_lock_irq(unit);
-        unit->res = sched_pick_resource(vcpu_scheduler(v), unit);
-        v->processor = unit->res->processor;
+        res = sched_pick_resource(vcpu_scheduler(v), unit);
+        sched_set_res(unit, res);
         spin_unlock_irq(lock);
 
         if ( old_cpu != v->processor )
