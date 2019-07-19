@@ -348,8 +348,6 @@ void start_secondary(void)
 
     setup_cpu_sibling_map(cpuid);
 
-    scheduler_percpu_init(cpuid);
-
     /* Run local notifiers */
     notify_cpu_starting(cpuid);
     /*
