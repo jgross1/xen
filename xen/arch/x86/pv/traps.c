@@ -22,6 +22,7 @@
 #include <xen/event.h>
 #include <xen/hypercall.h>
 #include <xen/lib.h>
+#include <xen/sched.h>
 #include <xen/trace.h>
 #include <xen/softirq.h>
 
@@ -155,8 +156,8 @@ static void nmi_mce_softirq(void)
      * Set the tmp value unconditionally, so that the check in the iret
      * hypercall works.
      */
-    cpumask_copy(st->vcpu->cpu_hard_affinity_tmp,
-                 st->vcpu->cpu_hard_affinity);
+    cpumask_copy(st->vcpu->sched_unit->cpu_hard_affinity_tmp,
+                 st->vcpu->sched_unit->cpu_hard_affinity);
 
     if ( (cpu != st->processor) ||
          (st->processor != st->vcpu->processor) )
