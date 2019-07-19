@@ -868,6 +868,8 @@ static int __init cpupool_init(void)
     unsigned int cpu;
     int err;
 
+    scheduler_gran_init();
+
     cpupool0 = cpupool_create(0, 0, &err);
     BUG_ON(cpupool0 == NULL);
     cpupool_put(cpupool0);

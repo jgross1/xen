@@ -614,5 +614,6 @@ affinity_balance_cpumask(const struct sched_unit *unit, int step,
 
 void sched_rm_cpu(unsigned int cpu);
 const cpumask_t *sched_get_opt_cpumask(enum sched_gran opt, unsigned int cpu);
+void scheduler_gran_init(void);
 
 #endif /* __XEN_SCHED_IF_H__ */
