@@ -673,35 +673,40 @@ void vcpu_unblock(struct vcpu *v)
 }
 
 /*
- * Do the actual movement of a vcpu from old to new CPU. Locks for *both*
+ * Do the actual movement of an unit from old to new CPU. Locks for *both*
  * CPUs needs to have been taken already when calling this!
  */
-static void vcpu_move_locked(struct vcpu *v, unsigned int new_cpu)
+static void sched_unit_move_locked(struct sched_unit *unit,
+                                   unsigned int new_cpu)
 {
-    unsigned int old_cpu = v->processor;
+    unsigned int old_cpu = unit->res->processor;
+    struct vcpu *v;
 
     /*
      * Transfer urgency status to new CPU before switching CPUs, as
      * once the switch occurs, v->is_urgent is no longer protected by
      * the per-CPU scheduler lock we are holding.
      */
-    if ( unlikely(v->is_urgent) && (old_cpu != new_cpu) )
+    for_each_sched_unit_vcpu ( unit, v )
     {
-        atomic_inc(&get_sched_res(new_cpu)->urgent_count);
-        atomic_dec(&get_sched_res(old_cpu)->urgent_count);
+        if ( unlikely(v->is_urgent) && (old_cpu != new_cpu) )
+        {
+            atomic_inc(&get_sched_res(new_cpu)->urgent_count);
+            atomic_dec(&get_sched_res(old_cpu)->urgent_count);
+        }
     }
 
     /*
      * Actual CPU switch to new CPU.  This is safe because the lock
      * pointer can't change while the current lock is held.
      */
-    sched_migrate(vcpu_scheduler(v), v->sched_unit, new_cpu);
+    sched_migrate(vcpu_scheduler(unit->vcpu), unit, new_cpu);
 }
 
 /*
  * Initiating migration
  *
- * In order to migrate, we need the vcpu in question to have stopped
+ * In order to migrate, we need the unit in question to have stopped
  * running and had sched_sleep() called (to take it off any
  * runqueues, for instance); and if it is currently running, it needs
  * to be scheduled out.  Finally, we need to hold the scheduling locks
@@ -717,37 +722,45 @@ static void vcpu_move_locked(struct vcpu *v, unsigned int new_cpu)
  * should be called like this:
  *
  *     lock = unit_schedule_lock_irq(unit);
- *     vcpu_migrate_start(v);
+ *     sched_unit_migrate_start(unit);
  *     unit_schedule_unlock_irq(lock, unit)
- *     vcpu_migrate_finish(v);
+ *     sched_unit_migrate_finish(unit);
  *
- * vcpu_migrate_finish() will do the work now if it can, or simply
- * return if it can't (because v is still running); in that case
- * vcpu_migrate_finish() will be called by context_saved().
+ * sched_unit_migrate_finish() will do the work now if it can, or simply
+ * return if it can't (because unit is still running); in that case
+ * sched_unit_migrate_finish() will be called by context_saved().
  */
-static void vcpu_migrate_start(struct vcpu *v)
+static void sched_unit_migrate_start(struct sched_unit *unit)
 {
-    set_bit(_VPF_migrating, &v->pause_flags);
-    vcpu_sleep_nosync_locked(v);
+    struct vcpu *v;
+
+    for_each_sched_unit_vcpu ( unit, v )
+    {
+        set_bit(_VPF_migrating, &v->pause_flags);
+        vcpu_sleep_nosync_locked(v);
+    }
 }
 
-static void vcpu_migrate_finish(struct vcpu *v)
+static void sched_unit_migrate_finish(struct sched_unit *unit)
 {
     unsigned long flags;
     unsigned int old_cpu, new_cpu;
     spinlock_t *old_lock, *new_lock;
     bool_t pick_called = 0;
+    struct vcpu *v;
 
     /*
-     * If the vcpu is currently running, this will be handled by
+     * If the unit is currently running, this will be handled by
      * context_saved(); and in any case, if the bit is cleared, then
      * someone else has already done the work so we don't need to.
      */
-    if ( v->sched_unit->is_running ||
-         !test_bit(_VPF_migrating, &v->pause_flags) )
-        return;
+    for_each_sched_unit_vcpu ( unit, v )
+    {
+        if ( unit->is_running || !test_bit(_VPF_migrating, &v->pause_flags) )
+            return;
+    }
 
-    old_cpu = new_cpu = v->processor;
+    old_cpu = new_cpu = unit->res->processor;
     for ( ; ; )
     {
         /*
@@ -760,7 +773,7 @@ static void vcpu_migrate_finish(struct vcpu *v)
 
         sched_spin_lock_double(old_lock, new_lock, &flags);
 
-        old_cpu = v->processor;
+        old_cpu = unit->res->processor;
         if ( old_lock == get_sched_res(old_cpu)->schedule_lock )
         {
             /*
@@ -769,15 +782,15 @@ static void vcpu_migrate_finish(struct vcpu *v)
              */
             if ( pick_called &&
                  (new_lock == get_sched_res(new_cpu)->schedule_lock) &&
-                 cpumask_test_cpu(new_cpu, v->sched_unit->cpu_hard_affinity) &&
-                 cpumask_test_cpu(new_cpu, v->domain->cpupool->cpu_valid) )
+                 cpumask_test_cpu(new_cpu, unit->cpu_hard_affinity) &&
+                 cpumask_test_cpu(new_cpu, unit->domain->cpupool->cpu_valid) )
                 break;
 
             /* Select a new CPU. */
-            new_cpu = sched_pick_resource(vcpu_scheduler(v),
-                                          v->sched_unit)->processor;
+            new_cpu = sched_pick_resource(vcpu_scheduler(unit->vcpu),
+                                          unit)->processor;
             if ( (new_lock == get_sched_res(new_cpu)->schedule_lock) &&
-                 cpumask_test_cpu(new_cpu, v->domain->cpupool->cpu_valid) )
+                 cpumask_test_cpu(new_cpu, unit->domain->cpupool->cpu_valid) )
                 break;
             pick_called = 1;
         }
@@ -798,22 +811,26 @@ static void vcpu_migrate_finish(struct vcpu *v)
      * because they both happen in (different) spinlock regions, and those
      * regions are strictly serialised.
      */
-    if ( v->sched_unit->is_running ||
-         !test_and_clear_bit(_VPF_migrating, &v->pause_flags) )
+    for_each_sched_unit_vcpu ( unit, v )
     {
-        sched_spin_unlock_double(old_lock, new_lock, flags);
-        return;
+        if ( unit->is_running ||
+             !test_and_clear_bit(_VPF_migrating, &v->pause_flags) )
+        {
+            sched_spin_unlock_double(old_lock, new_lock, flags);
+            return;
+        }
     }
 
-    vcpu_move_locked(v, new_cpu);
+    sched_unit_move_locked(unit, new_cpu);
 
     sched_spin_unlock_double(old_lock, new_lock, flags);
 
     if ( old_cpu != new_cpu )
-        sched_move_irqs(v->sched_unit);
+        sched_move_irqs(unit);
 
     /* Wake on new CPU. */
-    vcpu_wake(v);
+    for_each_sched_unit_vcpu ( unit, v )
+        vcpu_wake(v);
 }
 
 /*
@@ -955,10 +972,9 @@ int cpu_disable_scheduler(unsigned int cpu)
              *  * the scheduler will always find a suitable solution, or
              *    things would have failed before getting in here.
              */
-            vcpu_migrate_start(unit->vcpu);
+            sched_unit_migrate_start(unit);
             unit_schedule_unlock_irqrestore(lock, flags, unit);
-
-            vcpu_migrate_finish(unit->vcpu);
+            sched_unit_migrate_finish(unit);
 
             /*
              * The only caveat, in this case, is that if a vcpu active in
@@ -1042,14 +1058,14 @@ static int vcpu_set_affinity(
             ASSERT(which == unit->cpu_soft_affinity);
             sched_set_affinity(v, NULL, affinity);
         }
-        vcpu_migrate_start(v);
+        sched_unit_migrate_start(unit);
     }
 
     unit_schedule_unlock_irq(lock, unit);
 
     domain_update_node_affinity(v->domain);
 
-    vcpu_migrate_finish(v);
+    sched_unit_migrate_finish(unit);
 
     return ret;
 }
@@ -1293,13 +1309,13 @@ int vcpu_pin_override(struct vcpu *v, int cpu)
     }
 
     if ( ret == 0 )
-        vcpu_migrate_start(v);
+        sched_unit_migrate_start(unit);
 
     unit_schedule_unlock_irq(lock, unit);
 
     domain_update_node_affinity(v->domain);
 
-    vcpu_migrate_finish(v);
+    sched_unit_migrate_finish(unit);
 
     return ret;
 }
@@ -1686,7 +1702,7 @@ void context_saved(struct vcpu *prev)
 
     sched_context_saved(vcpu_scheduler(prev), prev->sched_unit);
 
-    vcpu_migrate_finish(prev);
+    sched_unit_migrate_finish(prev->sched_unit);
 }
 
 /* The scheduler timer: force a run through the scheduler */
