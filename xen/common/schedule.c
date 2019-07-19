@@ -275,10 +275,26 @@ static void sched_spin_unlock_double(spinlock_t *lock1, spinlock_t *lock2,
     spin_unlock_irqrestore(lock1, flags);
 }
 
-static void sched_free_unit(struct sched_unit *unit)
+static void sched_free_unit(struct sched_unit *unit, struct vcpu *v)
 {
     struct sched_unit *prev_unit;
     struct domain *d = unit->domain;
+    struct vcpu *vunit;
+    unsigned int cnt = 0;
+
+    /* Don't count to be released vcpu, might be not in vcpu list yet. */
+    for_each_sched_unit_vcpu ( unit, vunit )
+        if ( vunit != v )
+            cnt++;
+
+    v->sched_unit = NULL;
+    unit->runstate_cnt[v->runstate.state]--;
+
+    if ( cnt )
+        return;
+
+    if ( unit->vcpu == v )
+        unit->vcpu = v->next_in_list;
 
     if ( d->sched_unit_list == unit )
         d->sched_unit_list = unit->next_in_list;
@@ -294,8 +310,6 @@ static void sched_free_unit(struct sched_unit *unit)
         }
     }
 
-    unit->vcpu->sched_unit = NULL;
-
     free_cpumask_var(unit->cpu_hard_affinity);
     free_cpumask_var(unit->cpu_hard_affinity_tmp);
     free_cpumask_var(unit->cpu_hard_affinity_saved);
@@ -304,19 +318,38 @@ static void sched_free_unit(struct sched_unit *unit)
     xfree(unit);
 }
 
+static void sched_unit_add_vcpu(struct sched_unit *unit, struct vcpu *v)
+{
+    v->sched_unit = unit;
+    if ( !unit->vcpu || unit->vcpu->vcpu_id > v->vcpu_id )
+    {
+        unit->vcpu = v;
+        unit->unit_id = v->vcpu_id;
+    }
+    unit->runstate_cnt[v->runstate.state]++;
+}
+
 static struct sched_unit *sched_alloc_unit(struct vcpu *v)
 {
     struct sched_unit *unit, **prev_unit;
     struct domain *d = v->domain;
 
+    for_each_sched_unit ( d, unit )
+        if ( unit->vcpu->vcpu_id / sched_granularity ==
+             v->vcpu_id / sched_granularity )
+            break;
+
+    if ( unit )
+    {
+        sched_unit_add_vcpu(unit, v);
+        return unit;
+    }
+
     if ( (unit = xzalloc(struct sched_unit)) == NULL )
         return NULL;
 
-    v->sched_unit = unit;
-    unit->vcpu = v;
-    unit->unit_id = v->vcpu_id;
+    sched_unit_add_vcpu(unit, v);
     unit->domain = d;
-    unit->runstate_cnt[v->runstate.state]++;
 
     for ( prev_unit = &d->sched_unit_list; *prev_unit;
           prev_unit = &(*prev_unit)->next_in_list )
@@ -336,7 +369,7 @@ static struct sched_unit *sched_alloc_unit(struct vcpu *v)
     return unit;
 
  fail:
-    sched_free_unit(unit);
+    sched_free_unit(unit, v);
     return NULL;
 }
 
@@ -386,20 +419,25 @@ int sched_init_vcpu(struct vcpu *v)
     else
         processor = sched_select_initial_cpu(v);
 
-    sched_set_res(unit, get_sched_res(processor));
-
     /* Initialise the per-vcpu timers. */
-    init_timer(&v->periodic_timer, vcpu_periodic_timer_fn,
-               v, v->processor);
-    init_timer(&v->singleshot_timer, vcpu_singleshot_timer_fn,
-               v, v->processor);
-    init_timer(&v->poll_timer, poll_timer_fn,
-               v, v->processor);
+    init_timer(&v->periodic_timer, vcpu_periodic_timer_fn, v, processor);
+    init_timer(&v->singleshot_timer, vcpu_singleshot_timer_fn, v, processor);
+    init_timer(&v->poll_timer, poll_timer_fn, v, processor);
+
+    /* If this is not the first vcpu of the unit we are done. */
+    if ( unit->priv != NULL )
+    {
+        v->processor = processor;
+        return 0;
+    }
+
+    /* The first vcpu of an unit can be set via sched_set_res(). */
+    sched_set_res(unit, get_sched_res(processor));
 
     unit->priv = sched_alloc_vdata(dom_scheduler(d), unit, d->sched_priv);
     if ( unit->priv == NULL )
     {
-        sched_free_unit(unit);
+        sched_free_unit(unit, v);
         return 1;
     }
 
@@ -553,9 +591,16 @@ void sched_destroy_vcpu(struct vcpu *v)
     kill_timer(&v->poll_timer);
     if ( test_and_clear_bool(v->is_urgent) )
         atomic_dec(&get_sched_res(v->processor)->urgent_count);
-    sched_remove_unit(vcpu_scheduler(v), unit);
-    sched_free_vdata(vcpu_scheduler(v), unit->priv);
-    sched_free_unit(unit);
+    /*
+     * Vcpus are being destroyed top-down. So being the first vcpu of an unit
+     * is the same as being the only one.
+     */
+    if ( unit->vcpu == v )
+    {
+        sched_remove_unit(vcpu_scheduler(v), unit);
+        sched_free_vdata(vcpu_scheduler(v), unit->priv);
+        sched_free_unit(unit, v);
+    }
 }
 
 int sched_init_domain(struct domain *d, int poolid)
