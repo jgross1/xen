@@ -1670,7 +1670,7 @@ static void update_xen_slot_in_full_gdt(const struct vcpu *v, unsigned int cpu)
                                    : per_cpu(compat_gdt_table_l1e, cpu));
 }
 
-static void load_full_gdt(const struct vcpu *v)
+static void load_full_gdt(const struct vcpu *v, unsigned int cpu)
 {
     struct desc_ptr gdt_desc = {
         .limit = LAST_RESERVED_GDT_BYTE,
@@ -1678,6 +1678,8 @@ static void load_full_gdt(const struct vcpu *v)
     };
 
     lgdt(&gdt_desc);
+
+    per_cpu(full_gdt_loaded, cpu) = true;
 }
 
 static void load_default_gdt(unsigned int cpu)
@@ -1689,6 +1691,8 @@ static void load_default_gdt(unsigned int cpu)
     };
 
     lgdt(&gdt_desc);
+
+    per_cpu(full_gdt_loaded, cpu) = false;
 }
 
 static void __context_switch(void)
@@ -1698,6 +1702,7 @@ static void __context_switch(void)
     struct vcpu          *p = per_cpu(curr_vcpu, cpu);
     struct vcpu          *n = current;
     struct domain        *pd = p->domain, *nd = n->domain;
+    bool                  full_gdt;
 
     ASSERT(p != n);
     ASSERT(!vcpu_cpu_dirty(n));
@@ -1737,11 +1742,12 @@ static void __context_switch(void)
 
     psr_ctxt_switch_to(nd);
 
-    if ( need_full_gdt(nd) )
-        update_xen_slot_in_full_gdt(n, cpu);
+    full_gdt = need_full_gdt(nd);
 
-    if ( need_full_gdt(pd) &&
-         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt(nd)) )
+    if ( full_gdt )
+        update_xen_slot_in_full_gdt(n, cpu);
+    if ( per_cpu(full_gdt_loaded, cpu) &&
+         ((p->vcpu_id != n->vcpu_id) || !full_gdt) )
         load_default_gdt(cpu);
 
     write_ptbase(n);
@@ -1753,9 +1759,8 @@ static void __context_switch(void)
         svm_load_segs(0, 0, 0, 0, 0, 0, 0);
 #endif
 
-    if ( need_full_gdt(nd) &&
-         ((p->vcpu_id != n->vcpu_id) || !need_full_gdt(pd)) )
-        load_full_gdt(n);
+    if ( full_gdt && !per_cpu(full_gdt_loaded, cpu) )
+        load_full_gdt(n, cpu);
 
     if ( pd != nd )
         cpumask_clear_cpu(cpu, pd->dirty_cpumask);
