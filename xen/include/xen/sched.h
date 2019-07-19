@@ -900,6 +900,7 @@ int vcpu_pin_override(struct vcpu *v, int cpu);
 
 void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate);
 uint64_t get_cpu_idle_time(unsigned int cpu);
+int sched_has_urgent_vcpu(void);
 
 /*
  * Used by idle loop to decide whether there is work to do:

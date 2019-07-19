@@ -567,7 +567,7 @@ static inline struct csched2_private *csched2_priv(const struct scheduler *ops)
 
 static inline struct csched2_pcpu *csched2_pcpu(unsigned int cpu)
 {
-    return per_cpu(schedule_data, cpu).sched_priv;
+    return get_sched_res(cpu)->sched_priv;
 }
 
 static inline struct csched2_unit *csched2_unit(const struct sched_unit *unit)
@@ -1276,7 +1276,7 @@ runq_insert(const struct scheduler *ops, struct csched2_unit *svc)
     struct list_head * runq = &c2rqd(ops, cpu)->runq;
     int pos = 0;
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     ASSERT(!vcpu_on_runq(svc));
     ASSERT(c2r(cpu) == c2r(svc->vcpu->processor));
@@ -1797,7 +1797,7 @@ static bool vcpu_grab_budget(struct csched2_unit *svc)
     struct csched2_dom *sdom = svc->sdom;
     unsigned int cpu = svc->vcpu->processor;
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     if ( svc->budget > 0 )
         return true;
@@ -1844,7 +1844,7 @@ vcpu_return_budget(struct csched2_unit *svc, struct list_head *parked)
     struct csched2_dom *sdom = svc->sdom;
     unsigned int cpu = svc->vcpu->processor;
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
     ASSERT(list_empty(parked));
 
     /* budget_lock nests inside runqueue lock. */
@@ -2101,7 +2101,7 @@ csched2_unit_wake(const struct scheduler *ops, struct sched_unit *unit)
     unsigned int cpu = vc->processor;
     s_time_t now;
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     ASSERT(!is_idle_vcpu(vc));
 
@@ -2229,7 +2229,7 @@ csched2_res_pick(const struct scheduler *ops, struct sched_unit *unit)
      * just grab the prv lock.  Instead, we'll have to trylock, and
      * do something else reasonable if we fail.
      */
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     if ( !read_trylock(&prv->lock) )
     {
@@ -2569,7 +2569,7 @@ static void balance_load(const struct scheduler *ops, int cpu, s_time_t now)
      * on either side may be empty).
      */
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
     st.lrqd = c2rqd(ops, cpu);
 
     update_runq_load(ops, st.lrqd, 0, now);
@@ -3475,7 +3475,7 @@ csched2_schedule(
     rqd = c2rqd(ops, cpu);
     BUG_ON(!cpumask_test_cpu(cpu, &rqd->active));
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     BUG_ON(!is_idle_vcpu(scurr->vcpu) && scurr->rqd != rqd);
 
@@ -3863,7 +3863,7 @@ csched2_init_pdata(const struct scheduler *ops, void *pdata, int cpu)
 
     rqi = init_pdata(prv, pdata, cpu);
     /* Move the scheduler lock to the new runq lock. */
-    per_cpu(schedule_data, cpu).schedule_lock = &prv->rqd[rqi].lock;
+    get_sched_res(cpu)->schedule_lock = &prv->rqd[rqi].lock;
 
     /* _Not_ pcpu_schedule_unlock(): schedule_lock may have changed! */
     spin_unlock(old_lock);
@@ -3877,6 +3877,7 @@ csched2_switch_sched(struct scheduler *new_ops, unsigned int cpu,
 {
     struct csched2_private *prv = csched2_priv(new_ops);
     struct csched2_unit *svc = vdata;
+    struct sched_resource *sd = get_sched_res(cpu);
     unsigned rqi;
 
     ASSERT(pdata && svc && is_idle_vcpu(svc->vcpu));
@@ -3902,7 +3903,7 @@ csched2_switch_sched(struct scheduler *new_ops, unsigned int cpu,
      * this scheduler, and so it's safe to have taken it /before/ our
      * private global lock.
      */
-    ASSERT(per_cpu(schedule_data, cpu).schedule_lock != &prv->rqd[rqi].lock);
+    ASSERT(sd->schedule_lock != &prv->rqd[rqi].lock);
 
     write_unlock(&prv->lock);
 

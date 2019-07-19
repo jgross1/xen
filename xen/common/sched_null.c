@@ -167,7 +167,7 @@ static void init_pdata(struct null_private *prv, unsigned int cpu)
 static void null_init_pdata(const struct scheduler *ops, void *pdata, int cpu)
 {
     struct null_private *prv = null_priv(ops);
-    struct schedule_data *sd = &per_cpu(schedule_data, cpu);
+    struct sched_resource *sd = get_sched_res(cpu);
 
     /* alloc_pdata is not implemented, so we want this to be NULL. */
     ASSERT(!pdata);
@@ -276,7 +276,7 @@ pick_res(struct null_private *prv, struct sched_unit *unit)
     unsigned int cpu = v->processor, new_cpu;
     cpumask_t *cpus = cpupool_domain_cpumask(v->domain);
 
-    ASSERT(spin_is_locked(per_cpu(schedule_data, cpu).schedule_lock));
+    ASSERT(spin_is_locked(get_sched_res(cpu)->schedule_lock));
 
     for_each_affinity_balance_step( bs )
     {
@@ -388,7 +388,7 @@ static spinlock_t *null_switch_sched(struct scheduler *new_ops,
                                      unsigned int cpu,
                                      void *pdata, void *vdata)
 {
-    struct schedule_data *sd = &per_cpu(schedule_data, cpu);
+    struct sched_resource *sd = get_sched_res(cpu);
     struct null_private *prv = null_priv(new_ops);
     struct null_unit *nvc = vdata;
 
