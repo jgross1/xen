@@ -34,6 +34,7 @@
 #include <xen/cpu.h>
 #include <xen/preempt.h>
 #include <xen/event.h>
+#include <xen/warning.h>
 #include <public/sched.h>
 #include <xsm/xsm.h>
 #include <xen/err.h>
@@ -60,6 +61,23 @@ enum sched_gran __read_mostly opt_sched_granularity = SCHED_GRAN_cpu;
 unsigned int __read_mostly sched_granularity = 1;
 bool __read_mostly sched_disable_smt_switching;
 cpumask_var_t sched_res_mask;
+
+#ifdef CONFIG_HAS_SCHED_GRANULARITY
+static int __init sched_select_granularity(const char *str)
+{
+    if ( strcmp("cpu", str) == 0 )
+        opt_sched_granularity = SCHED_GRAN_cpu;
+    else if ( strcmp("core", str) == 0 )
+        opt_sched_granularity = SCHED_GRAN_core;
+    else if ( strcmp("socket", str) == 0 )
+        opt_sched_granularity = SCHED_GRAN_socket;
+    else
+        return -EINVAL;
+
+    return 0;
+}
+custom_param("sched-gran", sched_select_granularity);
+#endif
 
 /* Common lock for free cpus. */
 static DEFINE_SPINLOCK(sched_free_cpu_lock);
@@ -2604,6 +2622,66 @@ void scheduler_enable(void)
     open_softirq(SCHEDULE_SOFTIRQ, schedule);
     open_softirq(SCHED_SLAVE_SOFTIRQ, sched_slave);
     scheduler_active = true;
+}
+
+static unsigned int __init sched_check_granularity(void)
+{
+    unsigned int cpu;
+    unsigned int siblings, gran = 0;
+
+    if ( opt_sched_granularity == SCHED_GRAN_cpu )
+        return 1;
+
+    for_each_online_cpu ( cpu )
+    {
+        siblings = cpumask_weight(sched_get_opt_cpumask(opt_sched_granularity,
+                                                        cpu));
+        if ( gran == 0 )
+            gran = siblings;
+        else if ( gran != siblings )
+            return 0;
+    }
+
+    sched_disable_smt_switching = true;
+
+    return gran;
+}
+
+/* Setup data for selected scheduler granularity. */
+void __init scheduler_gran_init(void)
+{
+    unsigned int gran = 0;
+    const char *fallback = NULL;
+
+    while ( gran == 0 )
+    {
+        gran = sched_check_granularity();
+
+        if ( gran == 0 )
+        {
+            switch ( opt_sched_granularity )
+            {
+            case SCHED_GRAN_core:
+                opt_sched_granularity = SCHED_GRAN_cpu;
+                fallback = "Asymmetric cpu configuration.\n"
+                           "Falling back to sched-gran=cpu.\n";
+                break;
+            case SCHED_GRAN_socket:
+                opt_sched_granularity = SCHED_GRAN_core;
+                fallback = "Asymmetric cpu configuration.\n"
+                           "Falling back to sched-gran=core.\n";
+                break;
+            default:
+                ASSERT_UNREACHABLE();
+                break;
+            }
+        }
+    }
+
+    if ( fallback )
+        warning_add(fallback);
+
+    sched_granularity = gran;
 }
 
 /* Initialise the data structures. */
