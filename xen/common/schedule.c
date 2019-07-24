@@ -81,7 +81,7 @@ static spinlock_t *
 sched_idle_switch_sched(struct scheduler *new_ops, unsigned int cpu,
                         void *pdata, void *vdata)
 {
-    idle_vcpu[cpu]->sched_priv = NULL;
+    idle_vcpu[cpu]->sched_unit->priv = NULL;
 
     return &sched_free_cpu_lock;
 }
@@ -327,8 +327,8 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     init_timer(&v->poll_timer, poll_timer_fn,
                v, v->processor);
 
-    v->sched_priv = sched_alloc_vdata(dom_scheduler(d), unit, d->sched_priv);
-    if ( v->sched_priv == NULL )
+    unit->priv = sched_alloc_vdata(dom_scheduler(d), unit, d->sched_priv);
+    if ( unit->priv == NULL )
     {
         v->sched_unit = NULL;
         xfree(unit);
@@ -423,7 +423,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
     {
         spinlock_t *lock;
 
-        vcpudata = v->sched_priv;
+        vcpudata = v->sched_unit->priv;
 
         migrate_timer(&v->periodic_timer, new_p);
         migrate_timer(&v->singleshot_timer, new_p);
@@ -441,7 +441,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
          */
         spin_unlock_irq(lock);
 
-        v->sched_priv = vcpu_priv[v->vcpu_id];
+        v->sched_unit->priv = vcpu_priv[v->vcpu_id];
         if ( !d->is_dying )
             sched_move_irqs(v);
 
@@ -473,7 +473,7 @@ void sched_destroy_vcpu(struct vcpu *v)
     if ( test_and_clear_bool(v->is_urgent) )
         atomic_dec(&per_cpu(schedule_data, v->processor).urgent_count);
     sched_remove_unit(vcpu_scheduler(v), unit);
-    sched_free_vdata(vcpu_scheduler(v), v->sched_priv);
+    sched_free_vdata(vcpu_scheduler(v), unit->priv);
     xfree(unit);
     v->sched_unit = NULL;
 }
@@ -1922,7 +1922,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
      */
     old_lock = pcpu_schedule_lock_irqsave(cpu, &flags);
 
-    vpriv_old = idle->sched_priv;
+    vpriv_old = idle->sched_unit->priv;
     ppriv_old = sd->sched_priv;
     new_lock = sched_switch_sched(new_ops, cpu, ppriv, vpriv);
 
