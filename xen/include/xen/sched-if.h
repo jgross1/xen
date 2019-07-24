@@ -33,22 +33,18 @@ extern int sched_ratelimit_us;
  * For cache betterness, keep the actual lock in the same cache area
  * as the rest of the struct.  Just have the scheduler point to the
  * one it wants (This may be the one right in front of it).*/
-struct schedule_data {
+struct sched_resource {
     spinlock_t         *schedule_lock,
                        _lock;
     struct sched_unit  *curr;           /* current task                    */
     void               *sched_priv;
     struct timer        s_timer;        /* scheduling timer                */
     atomic_t            urgent_count;   /* how many urgent vcpus           */
+    unsigned int        processor;
 };
 
-#define curr_on_cpu(c)    (per_cpu(schedule_data, c).curr)
+#define curr_on_cpu(c)    (get_sched_res(c)->curr)
 
-struct sched_resource {
-    unsigned int processor;
-};
-
-DECLARE_PER_CPU(struct schedule_data, schedule_data);
 DECLARE_PER_CPU(struct scheduler *, scheduler);
 DECLARE_PER_CPU(struct cpupool *, cpupool);
 DECLARE_PER_CPU(struct sched_resource *, sched_res);
@@ -79,7 +75,7 @@ static inline spinlock_t *kind##_schedule_lock##irq(param EXTRA_TYPE(arg)) \
 { \
     for ( ; ; ) \
     { \
-        spinlock_t *lock = per_cpu(schedule_data, cpu).schedule_lock; \
+        spinlock_t *lock = get_sched_res(cpu)->schedule_lock; \
         /* \
          * v->processor may change when grabbing the lock; but \
          * per_cpu(v->processor) may also change, if changing cpu pool \
@@ -89,7 +85,7 @@ static inline spinlock_t *kind##_schedule_lock##irq(param EXTRA_TYPE(arg)) \
          * lock may be the same; this will succeed in that case. \
          */ \
         spin_lock##irq(lock, ## arg); \
-        if ( likely(lock == per_cpu(schedule_data, cpu).schedule_lock) ) \
+        if ( likely(lock == get_sched_res(cpu)->schedule_lock) ) \
             return lock; \
         spin_unlock##irq(lock, ## arg); \
     } \
@@ -99,7 +95,7 @@ static inline spinlock_t *kind##_schedule_lock##irq(param EXTRA_TYPE(arg)) \
 static inline void kind##_schedule_unlock##irq(spinlock_t *lock \
                                                EXTRA_TYPE(arg), param) \
 { \
-    ASSERT(lock == per_cpu(schedule_data, cpu).schedule_lock); \
+    ASSERT(lock == get_sched_res(cpu)->schedule_lock); \
     spin_unlock##irq(lock, ## arg); \
 }
 
@@ -128,11 +124,11 @@ sched_unlock(vcpu, const struct vcpu *v, v->processor, _irqrestore, flags)
 
 static inline spinlock_t *pcpu_schedule_trylock(unsigned int cpu)
 {
-    spinlock_t *lock = per_cpu(schedule_data, cpu).schedule_lock;
+    spinlock_t *lock = get_sched_res(cpu)->schedule_lock;
 
     if ( !spin_trylock(lock) )
         return NULL;
-    if ( lock == per_cpu(schedule_data, cpu).schedule_lock )
+    if ( lock == get_sched_res(cpu)->schedule_lock )
         return lock;
     spin_unlock(lock);
     return NULL;
