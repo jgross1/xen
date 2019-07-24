@@ -13,8 +13,7 @@ typedef union {
     struct compat_vcpu_guest_context *cmp;
 } vcpu_guest_context_u __attribute__((__transparent_union__));
 
-struct vcpu *vcpu_create(
-    struct domain *d, unsigned int vcpu_id, unsigned int cpu_id);
+struct vcpu *vcpu_create(struct domain *d, unsigned int vcpu_id);
 
 unsigned int dom0_max_vcpus(void);
 struct vcpu *alloc_dom0_vcpu0(struct domain *dom0);
