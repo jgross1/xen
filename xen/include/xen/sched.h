@@ -926,6 +926,8 @@ void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate);
 uint64_t get_cpu_idle_time(unsigned int cpu);
 bool sched_has_urgent_vcpu(void);
 void sched_guest_idle(void (*idle) (void), unsigned int cpu);
+void scheduler_enable(void);
+void scheduler_disable(void);
 
 /*
  * Used by idle loop to decide whether there is work to do:
