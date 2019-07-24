@@ -198,12 +198,9 @@ custom_param("dom0_nodes", parse_dom0_nodes);
 
 static cpumask_t __initdata dom0_cpus;
 
-struct vcpu *__init dom0_setup_vcpu(struct domain *d,
-                                    unsigned int vcpu_id,
-                                    unsigned int prev_cpu)
+struct vcpu *__init dom0_setup_vcpu(struct domain *d, unsigned int vcpu_id)
 {
-    unsigned int cpu = cpumask_cycle(prev_cpu, &dom0_cpus);
-    struct vcpu *v = vcpu_create(d, vcpu_id, cpu);
+    struct vcpu *v = vcpu_create(d, vcpu_id);
 
     if ( v )
     {
@@ -273,8 +270,7 @@ struct vcpu *__init alloc_dom0_vcpu0(struct domain *dom0)
     dom0->node_affinity = dom0_nodes;
     dom0->auto_node_affinity = !dom0_nr_pxms;
 
-    return dom0_setup_vcpu(dom0, 0,
-                           cpumask_last(&dom0_cpus) /* so it wraps around to first pcpu */);
+    return dom0_setup_vcpu(dom0, 0);
 }
 
 #ifdef CONFIG_SHADOW_PAGING
