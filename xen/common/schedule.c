@@ -240,8 +240,9 @@ static inline void vcpu_runstate_change(
     s_time_t delta;
     struct sched_unit *unit = v->sched_unit;
 
-    ASSERT(v->runstate.state != new_state);
     ASSERT(spin_is_locked(get_sched_res(v->processor)->schedule_lock));
+    if ( v->runstate.state == new_state )
+        return;
 
     vcpu_urgent_count_update(v);
 
@@ -263,15 +264,16 @@ static inline void vcpu_runstate_change(
 static inline void sched_unit_runstate_change(struct sched_unit *unit,
     bool running, s_time_t new_entry_time)
 {
-    struct vcpu *v = unit->vcpu_list;
+    struct vcpu *v;
 
-    if ( running )
-        vcpu_runstate_change(v, v->new_state, new_entry_time);
-    else
-        vcpu_runstate_change(v,
-            ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
-             (vcpu_runnable(v) ? RUNSTATE_runnable : RUNSTATE_offline)),
-            new_entry_time);
+    for_each_sched_unit_vcpu ( unit, v )
+        if ( running )
+            vcpu_runstate_change(v, v->new_state, new_entry_time);
+        else
+            vcpu_runstate_change(v,
+                ((v->pause_flags & VPF_blocked) ? RUNSTATE_blocked :
+                 (vcpu_runnable(v) ? RUNSTATE_runnable : RUNSTATE_offline)),
+                new_entry_time);
 }
 
 void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate)
@@ -1035,9 +1037,9 @@ int cpu_disable_scheduler(unsigned int cpu)
             if ( cpumask_empty(&online_affinity) &&
                  cpumask_test_cpu(cpu, unit->cpu_hard_affinity) )
             {
-                if ( unit->vcpu_list->affinity_broken )
+                if ( sched_check_affinity_broken(unit) )
                 {
-                    /* The vcpu is temporarily pinned, can't move it. */
+                    /* The unit is temporarily pinned, can't move it. */
                     unit_schedule_unlock_irqrestore(lock, flags, unit);
                     ret = -EADDRINUSE;
                     break;
@@ -1395,17 +1397,17 @@ int vcpu_temporary_affinity(struct vcpu *v, unsigned int cpu, uint8_t reason)
             ret = 0;
             v->affinity_broken &= ~reason;
         }
-        if ( !ret && !v->affinity_broken )
+        if ( !ret && !sched_check_affinity_broken(unit) )
             sched_set_affinity(v, unit->cpu_hard_affinity_saved, NULL);
     }
     else if ( cpu < nr_cpu_ids )
     {
         if ( (v->affinity_broken & reason) ||
-             (v->affinity_broken && v->processor != cpu) )
+             (sched_check_affinity_broken(unit) && v->processor != cpu) )
             ret = -EBUSY;
         else if ( cpumask_test_cpu(cpu, VCPU2ONLINE(v)) )
         {
-            if ( !v->affinity_broken )
+            if ( !sched_check_affinity_broken(unit) )
             {
                 cpumask_copy(unit->cpu_hard_affinity_saved,
                              unit->cpu_hard_affinity);
@@ -1701,14 +1703,14 @@ static void sched_switch_units(struct sched_resource *sd,
              (next->vcpu_list->runstate.state == RUNSTATE_runnable) ?
              (now - next->state_entry_time) : 0, prev->next_time);
 
-    ASSERT(prev->vcpu_list->runstate.state == RUNSTATE_running);
+    ASSERT(unit_running(prev));
 
     TRACE_4D(TRC_SCHED_SWITCH, prev->domain->domain_id, prev->unit_id,
              next->domain->domain_id, next->unit_id);
 
     sched_unit_runstate_change(prev, false, now);
 
-    ASSERT(next->vcpu_list->runstate.state != RUNSTATE_running);
+    ASSERT(!unit_running(next));
     sched_unit_runstate_change(next, true, now);
 
     /*
@@ -1829,7 +1831,7 @@ void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
             while ( atomic_read(&next->rendezvous_out_cnt) )
                 cpu_relax();
     }
-    else if ( vprev != vnext )
+    else if ( vprev != vnext && sched_granularity == 1 )
         context_saved(vprev);
 }
 
