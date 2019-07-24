@@ -42,6 +42,7 @@ struct sched_resource {
 
     /* Cpu with lowest id in scheduling resource. */
     unsigned int        master_cpu;
+    const cpumask_t    *cpus;           /* cpus covered by this struct     */
 };
 
 #define curr_on_cpu(c)    (get_sched_res(c)->curr)
