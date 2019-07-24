@@ -239,6 +239,7 @@ static inline void vcpu_runstate_change(
     struct vcpu *v, int new_state, s_time_t new_entry_time)
 {
     s_time_t delta;
+    struct sched_unit *unit = v->sched_unit;
 
     ASSERT(v->runstate.state != new_state);
     ASSERT(spin_is_locked(get_sched_res(v->processor)->schedule_lock));
@@ -246,6 +247,9 @@ static inline void vcpu_runstate_change(
     vcpu_urgent_count_update(v);
 
     trace_runstate_change(v, new_state);
+
+    unit->runstate_cnt[v->runstate.state]--;
+    unit->runstate_cnt[new_state]++;
 
     delta = new_entry_time - v->runstate.state_entry_time;
     if ( delta > 0 )
@@ -368,7 +372,7 @@ static struct sched_unit *sched_alloc_unit(struct vcpu *v)
     unit->vcpu_list = v;
     unit->unit_id = v->vcpu_id;
     unit->domain = d;
-    v->sched_unit = unit;
+    unit->runstate_cnt[v->runstate.state]++;
 
     for ( prev_unit = &d->sched_unit_list; *prev_unit;
           prev_unit = &(*prev_unit)->next_in_list )
@@ -383,6 +387,8 @@ static struct sched_unit *sched_alloc_unit(struct vcpu *v)
          !zalloc_cpumask_var(&unit->cpu_hard_affinity_saved) ||
          !zalloc_cpumask_var(&unit->cpu_soft_affinity) )
         goto fail;
+
+    v->sched_unit = unit;
 
     return unit;
 
