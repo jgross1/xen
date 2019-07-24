@@ -272,6 +272,11 @@ struct sched_unit {
     struct sched_resource *res;
     int                    unit_id;
 
+    /* Last time unit got (de-)scheduled. */
+    uint64_t               state_entry_time;
+
+    /* Currently running on a CPU? */
+    bool                   is_running;
     /* Does soft affinity actually play a role (given hard affinity)? */
     bool                   soft_aff_effective;
     /* Bitmask of CPUs on which this VCPU may run. */
