@@ -24,7 +24,7 @@ extern cpumask_t cpupool_free_cpus;
 extern int sched_ratelimit_us;
 
 /* Scheduling resource mask. */
-extern const cpumask_t *sched_res_mask;
+extern cpumask_var_t sched_res_mask;
 
 /* Number of vcpus per struct sched_unit. */
 enum sched_gran {
@@ -58,7 +58,7 @@ struct sched_resource {
     atomic_t            urgent_count;   /* how many urgent vcpus           */
     unsigned int        processor;
     unsigned int        granularity;
-    const cpumask_t    *cpus;           /* cpus covered by this struct     */
+    cpumask_var_t       cpus;           /* cpus covered by this struct     */
     struct rcu_head     rcu;
 };
 
