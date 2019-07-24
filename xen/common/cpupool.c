@@ -535,6 +535,7 @@ static void cpupool_cpu_remove(unsigned int cpu)
         ret = cpupool_unassign_cpu_epilogue(cpupool0);
         BUG_ON(ret);
     }
+    cpumask_clear_cpu(cpu, &cpupool_free_cpus);
 }
 
 /*
@@ -584,19 +585,18 @@ static void cpupool_cpu_remove_forced(unsigned int cpu)
     struct cpupool **c;
     int ret;
 
-    if ( cpumask_test_cpu(cpu, &cpupool_free_cpus) )
-        cpumask_clear_cpu(cpu, &cpupool_free_cpus);
-    else
+    for_each_cpupool ( c )
     {
-        for_each_cpupool(c)
+        if ( cpumask_test_cpu(cpu, (*c)->cpu_valid) )
         {
-            if ( cpumask_test_cpu(cpu, (*c)->cpu_valid) )
-            {
-                ret = cpupool_unassign_cpu(*c, cpu);
-                BUG_ON(ret);
-            }
+            ret = cpupool_unassign_cpu_prologue(*c, cpu);
+            BUG_ON(ret);
+            ret = cpupool_unassign_cpu_epilogue(*c);
+            BUG_ON(ret);
         }
     }
+
+    cpumask_clear_cpu(cpu, &cpupool_free_cpus);
 
     rcu_read_lock(&sched_res_rculock);
     sched_rm_cpu(cpu);
