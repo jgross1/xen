@@ -112,7 +112,7 @@ static struct task_slice sched_idle_schedule(
     const unsigned int cpu = smp_processor_id();
     struct task_slice ret = { .time = -1 };
 
-    ret.task = sched_idle_unit(cpu);
+    ret.task = sched_idle_unit(sched_get_resource_cpu(cpu));
     return ret;
 }
 
