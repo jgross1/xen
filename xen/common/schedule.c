@@ -250,7 +250,8 @@ static inline void vcpu_runstate_change(
 
 void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate)
 {
-    spinlock_t *lock = likely(v == current) ? NULL : vcpu_schedule_lock_irq(v);
+    spinlock_t *lock = likely(v == current)
+                       ? NULL : unit_schedule_lock_irq(v->sched_unit);
     s_time_t delta;
 
     memcpy(runstate, &v->runstate, sizeof(*runstate));
@@ -259,7 +260,7 @@ void vcpu_runstate_get(struct vcpu *v, struct vcpu_runstate_info *runstate)
         runstate->time[runstate->state] += delta;
 
     if ( unlikely(lock != NULL) )
-        vcpu_schedule_unlock_irq(lock, v);
+        unit_schedule_unlock_irq(lock, v->sched_unit);
 }
 
 uint64_t get_cpu_idle_time(unsigned int cpu)
@@ -473,7 +474,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
         migrate_timer(&v->singleshot_timer, new_p);
         migrate_timer(&v->poll_timer, new_p);
 
-        lock = vcpu_schedule_lock_irq(v);
+        lock = unit_schedule_lock_irq(v->sched_unit);
 
         sched_set_affinity(v, &cpumask_all, &cpumask_all);
 
@@ -482,7 +483,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
         /*
          * With v->processor modified we must not
          * - make any further changes assuming we hold the scheduler lock,
-         * - use vcpu_schedule_unlock_irq().
+         * - use unit_schedule_unlock_irq().
          */
         spin_unlock_irq(lock);
 
@@ -581,11 +582,11 @@ void vcpu_sleep_nosync(struct vcpu *v)
 
     TRACE_2D(TRC_SCHED_SLEEP, v->domain->domain_id, v->vcpu_id);
 
-    lock = vcpu_schedule_lock_irqsave(v, &flags);
+    lock = unit_schedule_lock_irqsave(v->sched_unit, &flags);
 
     vcpu_sleep_nosync_locked(v);
 
-    vcpu_schedule_unlock_irqrestore(lock, flags, v);
+    unit_schedule_unlock_irqrestore(lock, flags, v->sched_unit);
 }
 
 void vcpu_sleep_sync(struct vcpu *v)
@@ -605,7 +606,7 @@ void vcpu_wake(struct vcpu *v)
 
     TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
 
-    lock = vcpu_schedule_lock_irqsave(v, &flags);
+    lock = unit_schedule_lock_irqsave(v->sched_unit, &flags);
 
     if ( likely(vcpu_runnable(v)) )
     {
@@ -619,7 +620,7 @@ void vcpu_wake(struct vcpu *v)
             vcpu_runstate_change(v, RUNSTATE_offline, NOW());
     }
 
-    vcpu_schedule_unlock_irqrestore(lock, flags, v);
+    unit_schedule_unlock_irqrestore(lock, flags, v->sched_unit);
 }
 
 void vcpu_unblock(struct vcpu *v)
@@ -687,9 +688,9 @@ static void vcpu_move_locked(struct vcpu *v, unsigned int new_cpu)
  * These steps are encapsulated in the following two functions; they
  * should be called like this:
  *
- *     lock = vcpu_schedule_lock_irq(v);
+ *     lock = unit_schedule_lock_irq(unit);
  *     vcpu_migrate_start(v);
- *     vcpu_schedule_unlock_irq(lock, v)
+ *     unit_schedule_unlock_irq(lock, unit)
  *     vcpu_migrate_finish(v);
  *
  * vcpu_migrate_finish() will do the work now if it can, or simply
@@ -794,12 +795,12 @@ static void vcpu_migrate_finish(struct vcpu *v)
  */
 void vcpu_force_reschedule(struct vcpu *v)
 {
-    spinlock_t *lock = vcpu_schedule_lock_irq(v);
+    spinlock_t *lock = unit_schedule_lock_irq(v->sched_unit);
 
     if ( v->is_running )
         vcpu_migrate_start(v);
 
-    vcpu_schedule_unlock_irq(lock, v);
+    unit_schedule_unlock_irq(lock, v->sched_unit);
 
     vcpu_migrate_finish(v);
 }
@@ -826,7 +827,7 @@ void restore_vcpu_affinity(struct domain *d)
          * set v->processor of each of their vCPUs to something that will
          * make sense for the scheduler of the cpupool in which they are in.
          */
-        lock = vcpu_schedule_lock_irq(v);
+        lock = unit_schedule_lock_irq(v->sched_unit);
 
         cpumask_and(cpumask_scratch_cpu(cpu), v->cpu_hard_affinity,
                     cpupool_domain_cpumask(d));
@@ -855,7 +856,7 @@ void restore_vcpu_affinity(struct domain *d)
         spin_unlock_irq(lock);
 
         /* v->processor might have changed, so reacquire the lock. */
-        lock = vcpu_schedule_lock_irq(v);
+        lock = unit_schedule_lock_irq(v->sched_unit);
         v->sched_unit->res = sched_pick_resource(vcpu_scheduler(v),
                                                  v->sched_unit);
         v->processor = v->sched_unit->res->processor;
@@ -890,7 +891,7 @@ int cpu_disable_scheduler(unsigned int cpu)
         for_each_vcpu ( d, v )
         {
             unsigned long flags;
-            spinlock_t *lock = vcpu_schedule_lock_irqsave(v, &flags);
+            spinlock_t *lock = unit_schedule_lock_irqsave(v->sched_unit, &flags);
 
             cpumask_and(&online_affinity, v->cpu_hard_affinity, c->cpu_valid);
             if ( cpumask_empty(&online_affinity) &&
@@ -899,7 +900,7 @@ int cpu_disable_scheduler(unsigned int cpu)
                 if ( v->affinity_broken )
                 {
                     /* The vcpu is temporarily pinned, can't move it. */
-                    vcpu_schedule_unlock_irqrestore(lock, flags, v);
+                    unit_schedule_unlock_irqrestore(lock, flags, v->sched_unit);
                     ret = -EADDRINUSE;
                     break;
                 }
@@ -912,7 +913,7 @@ int cpu_disable_scheduler(unsigned int cpu)
             if ( v->processor != cpu )
             {
                 /* The vcpu is not on this cpu, so we can move on. */
-                vcpu_schedule_unlock_irqrestore(lock, flags, v);
+                unit_schedule_unlock_irqrestore(lock, flags, v->sched_unit);
                 continue;
             }
 
@@ -925,7 +926,7 @@ int cpu_disable_scheduler(unsigned int cpu)
              *    things would have failed before getting in here.
              */
             vcpu_migrate_start(v);
-            vcpu_schedule_unlock_irqrestore(lock, flags, v);
+            unit_schedule_unlock_irqrestore(lock, flags, v->sched_unit);
 
             vcpu_migrate_finish(v);
 
@@ -989,7 +990,7 @@ static int vcpu_set_affinity(
     spinlock_t *lock;
     int ret = 0;
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = unit_schedule_lock_irq(v->sched_unit);
 
     if ( v->affinity_broken )
         ret = -EBUSY;
@@ -1011,7 +1012,7 @@ static int vcpu_set_affinity(
         vcpu_migrate_start(v);
     }
 
-    vcpu_schedule_unlock_irq(lock, v);
+    unit_schedule_unlock_irq(lock, v->sched_unit);
 
     domain_update_node_affinity(v->domain);
 
@@ -1143,10 +1144,10 @@ static long do_poll(struct sched_poll *sched_poll)
 long vcpu_yield(void)
 {
     struct vcpu * v=current;
-    spinlock_t *lock = vcpu_schedule_lock_irq(v);
+    spinlock_t *lock = unit_schedule_lock_irq(v->sched_unit);
 
     sched_yield(vcpu_scheduler(v), v->sched_unit);
-    vcpu_schedule_unlock_irq(lock, v);
+    unit_schedule_unlock_irq(lock, v->sched_unit);
 
     SCHED_STAT_CRANK(vcpu_yield);
 
@@ -1243,7 +1244,7 @@ int vcpu_temporary_affinity(struct vcpu *v, unsigned int cpu, uint8_t reason)
     int ret = -EINVAL;
     bool migrate;
 
-    lock = vcpu_schedule_lock_irq(v);
+    lock = unit_schedule_lock_irq(v->sched_unit);
 
     if ( cpu == NR_CPUS )
     {
@@ -1276,7 +1277,7 @@ int vcpu_temporary_affinity(struct vcpu *v, unsigned int cpu, uint8_t reason)
     if ( migrate )
         vcpu_migrate_start(v);
 
-    vcpu_schedule_unlock_irq(lock, v);
+    unit_schedule_unlock_irq(lock, v->sched_unit);
 
     if ( migrate )
         vcpu_migrate_finish(v);
