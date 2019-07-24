@@ -140,6 +140,7 @@ void evtchn_destroy(struct domain *d); /* from domain_kill */
 void evtchn_destroy_final(struct domain *d); /* from complete_domain_destroy */
 
 struct waitqueue_vcpu;
+struct sched_unit;
 
 struct vcpu
 {
@@ -160,6 +161,7 @@ struct vcpu
 
     struct timer     poll_timer;    /* timeout for SCHEDOP_poll */
 
+    struct sched_unit *sched_unit;
     void            *sched_priv;    /* scheduler-specific data */
 
     struct vcpu_runstate_info runstate;
@@ -270,6 +272,12 @@ struct vcpu
     struct vpci_vcpu vpci;
 
     struct arch_vcpu arch;
+};
+
+struct sched_unit {
+    struct domain         *domain;
+    struct vcpu           *vcpu_list;
+    int                    unit_id;
 };
 
 /* Per-domain lock can be recursively acquired in fault handlers. */
