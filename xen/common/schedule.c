@@ -56,7 +56,8 @@ int sched_ratelimit_us = SCHED_DEFAULT_RATELIMIT_US;
 integer_param("sched_ratelimit_us", sched_ratelimit_us);
 
 /* Number of vcpus per struct sched_unit. */
-static unsigned int __read_mostly sched_granularity = 1;
+enum sched_gran __read_mostly opt_sched_granularity = SCHED_GRAN_cpu;
+unsigned int __read_mostly sched_granularity = 1;
 bool __read_mostly sched_disable_smt_switching;
 const cpumask_t *sched_res_mask = &cpumask_all;
 
@@ -412,10 +413,10 @@ static struct sched_unit *sched_alloc_unit(struct vcpu *v)
 {
     struct sched_unit *unit, **prev_unit;
     struct domain *d = v->domain;
+    unsigned int gran = d->cpupool ? d->cpupool->granularity : 1;
 
     for_each_sched_unit ( d, unit )
-        if ( unit->vcpu_list->vcpu_id / sched_granularity ==
-             v->vcpu_id / sched_granularity )
+        if ( unit->vcpu_list->vcpu_id / gran == v->vcpu_id / gran )
             break;
 
     if ( unit )
@@ -582,7 +583,7 @@ int sched_move_domain(struct domain *d, struct cpupool *c)
         return PTR_ERR(domdata);
 
     unit_priv = xzalloc_array(void *,
-                              DIV_ROUND_UP(d->max_vcpus, sched_granularity));
+                              DIV_ROUND_UP(d->max_vcpus, c->granularity));
     if ( unit_priv == NULL )
     {
         sched_free_domdata(c->sched, domdata);
@@ -1825,11 +1826,11 @@ static void sched_switch_units(struct sched_resource *sd,
         if ( is_idle_unit(prev) )
         {
             prev->runstate_cnt[RUNSTATE_running] = 0;
-            prev->runstate_cnt[RUNSTATE_runnable] = sched_granularity;
+            prev->runstate_cnt[RUNSTATE_runnable] = sd->granularity;
         }
         if ( is_idle_unit(next) )
         {
-            next->runstate_cnt[RUNSTATE_running] = sched_granularity;
+            next->runstate_cnt[RUNSTATE_running] = sd->granularity;
             next->runstate_cnt[RUNSTATE_runnable] = 0;
         }
     }
@@ -1978,7 +1979,7 @@ void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
     else
     {
         vcpu_context_saved(vprev, vnext);
-        if ( sched_granularity == 1 )
+        if ( sd->granularity == 1 )
             unit_context_saved(sd);
     }
 
@@ -2089,11 +2090,12 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
 {
     struct sched_unit *next;
     struct vcpu *v;
+    unsigned int gran = get_sched_res(cpu)->granularity;
 
     if ( !--prev->rendezvous_in_cnt )
     {
         next = do_schedule(prev, now, cpu);
-        atomic_set(&next->rendezvous_out_cnt, sched_granularity + 1);
+        atomic_set(&next->rendezvous_out_cnt, gran + 1);
         return next;
     }
 
@@ -2213,6 +2215,7 @@ static void schedule(void)
     struct sched_resource *sd;
     spinlock_t           *lock;
     int cpu = smp_processor_id();
+    unsigned int          gran = get_sched_res(cpu)->granularity;
 
     ASSERT_NOT_IN_ATOMIC();
 
@@ -2238,11 +2241,11 @@ static void schedule(void)
 
     stop_timer(&sd->s_timer);
 
-    if ( sched_granularity > 1 )
+    if ( gran > 1 )
     {
         cpumask_t mask;
 
-        prev->rendezvous_in_cnt = sched_granularity;
+        prev->rendezvous_in_cnt = gran;
         cpumask_andnot(&mask, sd->cpus, cpumask_of(cpu));
         cpumask_raise_softirq(&mask, SCHED_SLAVE_SOFTIRQ);
         next = sched_wait_rendezvous_in(prev, &lock, cpu, now);
@@ -2307,6 +2310,9 @@ static int cpu_schedule_up(unsigned int cpu)
     sd->schedule_lock = &sched_free_cpu_lock;
     init_timer(&sd->s_timer, s_timer_fn, NULL, cpu);
     atomic_set(&per_cpu(sched_urgent_count, cpu), 0);
+
+    /* We start with cpu granularity. */
+    sd->granularity = 1;
 
     /* Boot CPU is dealt with later in scheduler_init(). */
     if ( cpu == 0 )
@@ -2598,6 +2604,7 @@ int schedule_cpu_switch(unsigned int cpu, struct cpupool *c)
     sched_free_vdata(old_ops, vpriv_old);
     sched_free_pdata(old_ops, ppriv_old, cpu);
 
+    get_sched_res(cpu)->granularity = c ? c->granularity : 1;
     get_sched_res(cpu)->cpupool = c;
     /* When a cpu is added to a pool, trigger it to go pick up some work */
     if ( c != NULL )
