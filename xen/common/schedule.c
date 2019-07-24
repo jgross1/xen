@@ -87,10 +87,10 @@ sched_idle_switch_sched(struct scheduler *new_ops, unsigned int cpu,
     return &sched_free_cpu_lock;
 }
 
-static int
-sched_idle_cpu_pick(const struct scheduler *ops, struct sched_unit *unit)
+static struct sched_resource *
+sched_idle_res_pick(const struct scheduler *ops, struct sched_unit *unit)
 {
-    return unit->res->processor;
+    return unit->res;
 }
 
 static void *
@@ -122,7 +122,7 @@ static struct scheduler sched_idle_ops = {
     .opt_name       = "idle",
     .sched_data     = NULL,
 
-    .pick_cpu       = sched_idle_cpu_pick,
+    .pick_resource  = sched_idle_res_pick,
     .do_schedule    = sched_idle_schedule,
 
     .alloc_vdata    = sched_idle_alloc_vdata,
@@ -745,7 +745,8 @@ static void vcpu_migrate_finish(struct vcpu *v)
                 break;
 
             /* Select a new CPU. */
-            new_cpu = sched_pick_cpu(vcpu_scheduler(v), v->sched_unit);
+            new_cpu = sched_pick_resource(vcpu_scheduler(v),
+                                          v->sched_unit)->processor;
             if ( (new_lock == per_cpu(schedule_data, new_cpu).schedule_lock) &&
                  cpumask_test_cpu(new_cpu, v->domain->cpupool->cpu_valid) )
                 break;
@@ -856,8 +857,9 @@ void restore_vcpu_affinity(struct domain *d)
 
         /* v->processor might have changed, so reacquire the lock. */
         lock = vcpu_schedule_lock_irq(v);
-        v->processor = sched_pick_cpu(vcpu_scheduler(v), v->sched_unit);
-        v->sched_unit->res = get_sched_res(v->processor);
+        v->sched_unit->res = sched_pick_resource(vcpu_scheduler(v),
+                                                 v->sched_unit);
+        v->processor = v->sched_unit->res->processor;
         spin_unlock_irq(lock);
 
         if ( old_cpu != v->processor )
@@ -1846,7 +1848,7 @@ void __init scheduler_init(void)
 
         sched_test_func(init);
         sched_test_func(deinit);
-        sched_test_func(pick_cpu);
+        sched_test_func(pick_resource);
         sched_test_func(alloc_vdata);
         sched_test_func(free_vdata);
         sched_test_func(switch_sched);
