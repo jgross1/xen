@@ -5,7 +5,7 @@
 #include <asm/spinlock.h>
 #include <asm/types.h>
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_LOCKS
 union lock_debug {
     uint16_t val;
 #define LOCK_DEBUG_INITVAL 0xffff
