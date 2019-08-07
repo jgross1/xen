@@ -330,42 +330,43 @@ void _spin_unlock_recursive(spinlock_t *lock)
 #ifdef CONFIG_DEBUG_LOCK_PROFILE
 
 struct lock_profile_anc {
+    struct lock_profile_anc   *next;     /* next type */
     struct lock_profile_qhead *head_q;   /* first head of this type */
-    char                      *name;     /* descriptive string for print */
+    const char                *name;     /* descriptive string for print */
 };
 
 typedef void lock_profile_subfunc(
-    struct lock_profile *, int32_t, int32_t, void *);
+    struct lock_profile *, const char *, int32_t, void *);
 
 extern struct lock_profile *__lock_profile_start;
 extern struct lock_profile *__lock_profile_end;
 
 static s_time_t lock_profile_start;
-static struct lock_profile_anc lock_profile_ancs[LOCKPROF_TYPE_N];
+static struct lock_profile_anc *lock_profile_ancs;
 static struct lock_profile_qhead lock_profile_glb_q;
 static spinlock_t lock_profile_lock = SPIN_LOCK_UNLOCKED;
 
 static void spinlock_profile_iterate(lock_profile_subfunc *sub, void *par)
 {
-    int i;
+    struct lock_profile_anc *anc;
     struct lock_profile_qhead *hq;
     struct lock_profile *eq;
 
     spin_lock(&lock_profile_lock);
-    for ( i = 0; i < LOCKPROF_TYPE_N; i++ )
-        for ( hq = lock_profile_ancs[i].head_q; hq; hq = hq->head_q )
+    for ( anc = lock_profile_ancs; anc; anc = anc->next )
+        for ( hq = anc->head_q; hq; hq = hq->head_q )
             for ( eq = hq->elem_q; eq; eq = eq->next )
-                sub(eq, i, hq->idx, par);
+                sub(eq, anc->name, hq->idx, par);
     spin_unlock(&lock_profile_lock);
 }
 
 static void spinlock_profile_print_elem(struct lock_profile *data,
-    int32_t type, int32_t idx, void *par)
+    const char *type, int32_t idx, void *par)
 {
     struct spinlock *lock = data->lock;
 
-    printk("%s ", lock_profile_ancs[type].name);
-    if ( type != LOCKPROF_TYPE_GLOBAL )
+    printk("%s ", type);
+    if ( idx != LOCKPROF_IDX_NONE )
         printk("%d ", idx);
     printk("%s: addr=%p, lockval=%08x, ", data->name, lock,
            lock->tickets.head_tail);
@@ -389,7 +390,7 @@ void spinlock_profile_printall(unsigned char key)
 }
 
 static void spinlock_profile_reset_elem(struct lock_profile *data,
-    int32_t type, int32_t idx, void *par)
+    const char *type, int32_t idx, void *par)
 {
     data->lock_cnt = 0;
     data->block_cnt = 0;
@@ -413,7 +414,7 @@ typedef struct {
 } spinlock_profile_ucopy_t;
 
 static void spinlock_profile_ucopy_elem(struct lock_profile *data,
-    int32_t type, int32_t idx, void *par)
+    const char *type, int32_t idx, void *par)
 {
     spinlock_profile_ucopy_t *p = par;
     struct xen_sysctl_lockprof_data elem;
@@ -424,7 +425,7 @@ static void spinlock_profile_ucopy_elem(struct lock_profile *data,
     if ( p->pc->nr_elem < p->pc->max_elem )
     {
         safe_strcpy(elem.name, data->name);
-        elem.type = type;
+        safe_strcpy(elem.type, type);
         elem.idx = idx;
         elem.lock_cnt = data->lock_cnt;
         elem.block_cnt = data->block_cnt;
@@ -465,31 +466,70 @@ int spinlock_profile_control(struct xen_sysctl_lockprof_op *pc)
     return rc;
 }
 
-void _lock_profile_register_struct(
-    int32_t type, struct lock_profile_qhead *qhead, int32_t idx, char *name)
+static struct lock_profile_anc *find_prof_anc(const char *name)
 {
-    qhead->idx = idx;
+    struct lock_profile_anc *anc;
+
+    for ( anc = lock_profile_ancs; anc; anc = anc->next )
+        if ( !strcmp(anc->name, name) )
+            return anc;
+    return NULL;
+}
+
+void _lock_profile_register_struct(struct lock_profile_qhead *qhead,
+                                   int32_t idx, const char *name)
+{
+    struct lock_profile_anc *anc;
+
     spin_lock(&lock_profile_lock);
-    qhead->head_q = lock_profile_ancs[type].head_q;
-    lock_profile_ancs[type].head_q = qhead;
-    lock_profile_ancs[type].name = name;
+
+    anc = find_prof_anc(name);
+    if ( !anc )
+    {
+        anc = xzalloc(struct lock_profile_anc);
+        if ( !anc )
+            goto out;
+        anc->name = name;
+        anc->next = lock_profile_ancs;
+        lock_profile_ancs = anc;
+    }
+
+    qhead->idx = idx;
+    qhead->head_q = anc->head_q;
+    anc->head_q = qhead;
+
+ out:
     spin_unlock(&lock_profile_lock);
 }
 
-void _lock_profile_deregister_struct(
-    int32_t type, struct lock_profile_qhead *qhead)
+void _lock_profile_deregister_struct(struct lock_profile_qhead *qhead,
+                                     const char *name)
 {
+    struct lock_profile_anc *anc;
     struct lock_profile_qhead **q;
+    struct lock_profile *elem;
 
     spin_lock(&lock_profile_lock);
-    for ( q = &lock_profile_ancs[type].head_q; *q; q = &(*q)->head_q )
+
+    anc = find_prof_anc(name);
+    if ( anc )
     {
-        if ( *q == qhead )
+        for ( q = &anc->head_q; *q; q = &(*q)->head_q )
         {
-            *q = qhead->head_q;
-            break;
+            if ( *q == qhead )
+            {
+                *q = qhead->head_q;
+                while ( qhead->elem_q )
+                {
+                    elem = qhead->elem_q;
+                    qhead->elem_q = elem->next;
+                    xfree(elem);
+                }
+                break;
+            }
         }
     }
+
     spin_unlock(&lock_profile_lock);
 }
 
@@ -504,9 +544,8 @@ static int __init lock_prof_init(void)
         (*q)->lock->profile = *q;
     }
 
-    _lock_profile_register_struct(
-        LOCKPROF_TYPE_GLOBAL, &lock_profile_glb_q,
-        0, "Global lock");
+    _lock_profile_register_struct(&lock_profile_glb_q, LOCKPROF_IDX_NONE,
+                                  "Global");
 
     return 0;
 }

@@ -35,7 +35,7 @@
 #include "domctl.h"
 #include "physdev.h"
 
-#define XEN_SYSCTL_INTERFACE_VERSION 0x00000012
+#define XEN_SYSCTL_INTERFACE_VERSION 0x00000013
 
 /*
  * Read console content from Xen buffer ring.
@@ -433,14 +433,11 @@ struct xen_sysctl_page_offline_op {
 /* Sub-operations: */
 #define XEN_SYSCTL_LOCKPROF_reset 1   /* Reset all profile data to zero. */
 #define XEN_SYSCTL_LOCKPROF_query 2   /* Get lock profile information. */
-/* Record-type: */
-#define LOCKPROF_TYPE_GLOBAL      0   /* global lock, idx meaningless */
-#define LOCKPROF_TYPE_PERDOM      1   /* per-domain lock, idx is domid */
-#define LOCKPROF_TYPE_N           2   /* number of types */
 struct xen_sysctl_lockprof_data {
-    char     name[40];     /* lock name (may include up to 2 %d specifiers) */
-    int32_t  type;         /* LOCKPROF_TYPE_??? */
+    char     name[40];     /* lock name */
+    char     type[20];     /* e.g. "domain" */
     int32_t  idx;          /* index (e.g. domain id) */
+#define LOCKPROF_IDX_NONE  -1
     uint64_aligned_t lock_cnt;     /* # of locking succeeded */
     uint64_aligned_t block_cnt;    /* # of wait for lock */
     uint64_aligned_t lock_time;    /* nsecs lock held */

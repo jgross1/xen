@@ -290,7 +290,7 @@ static void _domain_destroy(struct domain *d)
 
     xsm_free_security_domain(d);
 
-    lock_profile_deregister_struct(LOCKPROF_TYPE_PERDOM, d);
+    lock_profile_deregister_struct(d, "Domain");
 
     free_domain_struct(d);
 }
@@ -376,7 +376,7 @@ struct domain *domain_create(domid_t domid,
         d->max_vcpus = config->max_vcpus;
     }
 
-    lock_profile_register_struct(LOCKPROF_TYPE_PERDOM, d, domid, "Domain");
+    lock_profile_register_struct(d, domid, "Domain");
 
     if ( (err = xsm_alloc_security_domain(d)) != 0 )
         goto fail;

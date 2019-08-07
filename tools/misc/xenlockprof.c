@@ -88,19 +88,10 @@ int main(int argc, char *argv[])
     sb = 0;
     for ( j = 0; j < i; j++ )
     {
-        switch ( data[j].type )
-        {
-        case LOCKPROF_TYPE_GLOBAL:
-            sprintf(name, "global lock %s", data[j].name);
-            break;
-        case LOCKPROF_TYPE_PERDOM:
-            sprintf(name, "domain %d lock %s", data[j].idx, data[j].name);
-            break;
-        default:
-            sprintf(name, "unknown type(%d) %d lock %s", data[j].type,
-                    data[j].idx, data[j].name);
-            break;
-        }
+        if ( data[j].idx == LOCKPROF_IDX_NONE )
+            sprintf(name, "%s %s", data[j].type, data[j].name);
+        else
+            sprintf(name, "%s %d %s", data[j].type, data[j].idx, data[j].name);
         l = (double)(data[j].lock_time) / 1E+09;
         b = (double)(data[j].block_time) / 1E+09;
         sl += l;
