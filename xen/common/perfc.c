@@ -241,10 +241,10 @@ static int perfc_copy_info(XEN_GUEST_HANDLE_64(xen_sysctl_perfc_desc_t) desc,
 /* Dom0 control of perf counters */
 int perfc_control(struct xen_sysctl_perfc_op *pc)
 {
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(perfc_control_lock);
     int rc;
 
-    spin_lock(&lock);
+    spin_lock(&perfc_control_lock);
 
     switch ( pc->cmd )
     {
@@ -262,7 +262,7 @@ int perfc_control(struct xen_sysctl_perfc_op *pc)
         break;
     }
 
-    spin_unlock(&lock);
+    spin_unlock(&perfc_control_lock);
 
     pc->nr_counters = NR_PERFCTRS;
     pc->nr_vals = perfc_nbr_vals;

@@ -368,10 +368,10 @@ void __init init_trace_bufs(void)
  */
 int tb_control(struct xen_sysctl_tbuf_op *tbc)
 {
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(tb_control_lock);
     int rc = 0;
 
-    spin_lock(&lock);
+    spin_lock(&tb_control_lock);
 
     switch ( tbc->cmd )
     {
@@ -432,7 +432,7 @@ int tb_control(struct xen_sysctl_tbuf_op *tbc)
         break;
     }
 
-    spin_unlock(&lock);
+    spin_unlock(&tb_control_lock);
 
     return rc;
 }

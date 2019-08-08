@@ -371,9 +371,9 @@ static void read_clocks(unsigned char key)
     static u64 sumdif_stime = 0, maxdif_stime = 0;
     static u64 sumdif_cycles = 0, maxdif_cycles = 0;
     static u32 count = 0;
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(read_clocks_lock);
 
-    spin_lock(&lock);
+    spin_lock(&read_clocks_lock);
 
     smp_call_function(read_clocks_slave, NULL, 0);
 
@@ -408,7 +408,7 @@ static void read_clocks(unsigned char key)
     min_cycles = per_cpu(read_cycles_time, min_cycles_cpu);
     max_cycles = per_cpu(read_cycles_time, max_cycles_cpu);
 
-    spin_unlock(&lock);
+    spin_unlock(&read_clocks_lock);
 
     dif_stime = max_stime - min_stime;
     if ( dif_stime > maxdif_stime )

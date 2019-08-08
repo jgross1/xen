@@ -1426,9 +1426,9 @@ static void tsc_check_slave(void *unused)
 static void tsc_check_reliability(void)
 {
     unsigned int cpu = smp_processor_id();
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(tsc_check_lock);
 
-    spin_lock(&lock);
+    spin_lock(&tsc_check_lock);
 
     tsc_check_count++;
     smp_call_function(tsc_check_slave, NULL, 0);
@@ -1439,7 +1439,7 @@ static void tsc_check_reliability(void)
     while ( !cpumask_empty(&tsc_check_cpumask) )
         cpu_relax();
 
-    spin_unlock(&lock);
+    spin_unlock(&tsc_check_lock);
 }
 
 /*

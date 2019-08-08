@@ -867,14 +867,14 @@ void set_direct_apic_vector(
 void alloc_direct_apic_vector(
     uint8_t *vector, void (*handler)(struct cpu_user_regs *))
 {
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(apic_alloc_lock);
 
-    spin_lock(&lock);
+    spin_lock(&apic_alloc_lock);
     if (*vector == 0) {
         *vector = alloc_hipriority_vector();
         set_direct_apic_vector(*vector, handler);
     }
-    spin_unlock(&lock);
+    spin_unlock(&apic_alloc_lock);
 }
 
 void do_IRQ(struct cpu_user_regs *regs)

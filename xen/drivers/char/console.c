@@ -1168,7 +1168,7 @@ void panic(const char *fmt, ...)
 {
     va_list args;
     unsigned long flags;
-    static DEFINE_SPINLOCK(lock);
+    static DEFINE_SPINLOCK(panic_lock);
     static char buf[128];
 
     spin_debug_disable();
@@ -1176,7 +1176,7 @@ void panic(const char *fmt, ...)
     debugtrace_dump();
 
     /* Protects buf[] and ensure multi-line message prints atomically. */
-    spin_lock_irqsave(&lock, flags);
+    spin_lock_irqsave(&panic_lock, flags);
 
     va_start(args, fmt);
     (void)vsnprintf(buf, sizeof(buf), fmt, args);
@@ -1196,7 +1196,7 @@ void panic(const char *fmt, ...)
         printk("Reboot in five seconds...\n");
 #endif
 
-    spin_unlock_irqrestore(&lock, flags);
+    spin_unlock_irqrestore(&panic_lock, flags);
 
     debugger_trap_immediate();
 
