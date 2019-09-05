@@ -533,6 +533,7 @@ int xc_lockprof_query(xc_interface *xch,
     rc = do_sysctl(xch, &sysctl);
 
     *n_elems = sysctl.u.lockprof_op.nr_elem;
+    *time = sysctl.u.lockprof_op.time;
 
     return rc;
 }

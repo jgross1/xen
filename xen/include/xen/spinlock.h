@@ -53,19 +53,24 @@ union lock_debug { };
 
       with ptr being the main structure pointer and lock the spinlock field
 
+      It should be noted that this will need to allocate memory, so interrupts
+      must be enabled.
+
     - each structure has to be added to profiling with
 
-      lock_profile_register_struct(type, ptr, idx, print);
+      lock_profile_register_struct(ptr, idx, print);
 
       with:
-        type:  something like LOCKPROF_TYPE_PERDOM
         ptr:   pointer to the structure
         idx:   index of that structure, e.g. domid
         print: descriptive string like "domain"
 
+      It should be noted that this will might need to allocate memory, so
+      interrupts must be enabled.
+
     - removing of a structure is done via
 
-      lock_profile_deregister_struct(type, ptr);
+      lock_profile_deregister_struct(ptr, print);
 */
 
 struct spinlock;
@@ -111,14 +116,14 @@ struct lock_profile_qhead {
         (s)->profile_head.elem_q = prof;                                      \
     } while(0)
 
-void _lock_profile_register_struct(
-    int32_t, struct lock_profile_qhead *, int32_t, char *);
-void _lock_profile_deregister_struct(int32_t, struct lock_profile_qhead *);
+void _lock_profile_register_struct(struct lock_profile_qhead *, int32_t,
+                                   const char *);
+void _lock_profile_deregister_struct(struct lock_profile_qhead *, const char *);
 
-#define lock_profile_register_struct(type, ptr, idx, print)                   \
-    _lock_profile_register_struct(type, &((ptr)->profile_head), idx, print)
-#define lock_profile_deregister_struct(type, ptr)                             \
-    _lock_profile_deregister_struct(type, &((ptr)->profile_head))
+#define lock_profile_register_struct(ptr, idx, print)                         \
+    _lock_profile_register_struct(&((ptr)->profile_head), idx, print)
+#define lock_profile_deregister_struct(ptr, print)                            \
+    _lock_profile_deregister_struct(&((ptr)->profile_head), print)
 
 extern int spinlock_profile_control(struct xen_sysctl_lockprof_op *pc);
 extern void spinlock_profile_printall(unsigned char key);
@@ -132,8 +137,8 @@ struct lock_profile_qhead { };
 #define DEFINE_SPINLOCK(l) spinlock_t l = SPIN_LOCK_UNLOCKED
 
 #define spin_lock_init_prof(s, l) spin_lock_init(&((s)->l))
-#define lock_profile_register_struct(type, ptr, idx, print)
-#define lock_profile_deregister_struct(type, ptr)
+#define lock_profile_register_struct(ptr, idx, print)
+#define lock_profile_deregister_struct(ptr, print)
 #define spinlock_profile_printall(key)
 
 #endif
