@@ -1166,6 +1166,8 @@ int printk_ratelimit(void)
 
 #ifdef CONFIG_DEBUG_TRACE
 
+#define DEBUG_TRACE_ENTRY_SIZE   1024
+
 /* Send output direct to console, or buffer it? */
 static volatile int debugtrace_send_to_console;
 
@@ -1173,6 +1175,7 @@ static char        *debugtrace_buf; /* Debug-trace buffer */
 static unsigned int debugtrace_prd; /* Producer index     */
 static unsigned int debugtrace_kilobytes = 128, debugtrace_bytes;
 static unsigned int debugtrace_used;
+static char debugtrace_last_entry_buf[DEBUG_TRACE_ENTRY_SIZE];
 static DEFINE_SPINLOCK(debugtrace_lock);
 integer_param("debugtrace", debugtrace_kilobytes);
 
@@ -1184,16 +1187,17 @@ static void debugtrace_dump_worker(void)
     printk("debugtrace_dump() starting\n");
 
     /* Print oldest portion of the ring. */
-    ASSERT(debugtrace_buf[debugtrace_bytes - 1] == 0);
     if ( debugtrace_buf[debugtrace_prd] != '\0' )
         console_serial_puts(&debugtrace_buf[debugtrace_prd],
-                            debugtrace_bytes - debugtrace_prd - 1);
+                            debugtrace_bytes - debugtrace_prd);
 
     /* Print youngest portion of the ring. */
     debugtrace_buf[debugtrace_prd] = '\0';
     console_serial_puts(&debugtrace_buf[0], debugtrace_prd);
 
     memset(debugtrace_buf, '\0', debugtrace_bytes);
+    debugtrace_prd = 0;
+    debugtrace_last_entry_buf[0] = 0;
 
     printk("debugtrace_dump() finished\n");
 }
@@ -1241,15 +1245,14 @@ static void debugtrace_add_to_buf(char *buf)
     for ( p = buf; *p != '\0'; p++ )
     {
         debugtrace_buf[debugtrace_prd++] = *p;
-        /* Always leave a nul byte at the end of the buffer. */
-        if ( debugtrace_prd == (debugtrace_bytes - 1) )
+        if ( debugtrace_prd == debugtrace_bytes )
             debugtrace_prd = 0;
     }
 }
 
 void debugtrace_printk(const char *fmt, ...)
 {
-    static char buf[1024], last_buf[1024];
+    static char buf[DEBUG_TRACE_ENTRY_SIZE];
     static unsigned int count, last_count, last_prd;
 
     char          cntbuf[24];
@@ -1264,8 +1267,6 @@ void debugtrace_printk(const char *fmt, ...)
 
     spin_lock_irqsave(&debugtrace_lock, flags);
 
-    ASSERT(debugtrace_buf[debugtrace_bytes - 1] == 0);
-
     va_start(args, fmt);
     nr = vscnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
@@ -1279,11 +1280,11 @@ void debugtrace_printk(const char *fmt, ...)
     }
     else
     {
-        if ( strcmp(buf, last_buf) )
+        if ( strcmp(buf, debugtrace_last_entry_buf) )
         {
             last_prd = debugtrace_prd;
             last_count = ++count;
-            safe_strcpy(last_buf, buf);
+            safe_strcpy(debugtrace_last_entry_buf, buf);
             snprintf(cntbuf, sizeof(cntbuf), "%u ", count);
         }
         else
