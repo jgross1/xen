@@ -2089,7 +2089,11 @@ void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
                 cpu_relax();
     }
     else
+    {
         vcpu_context_saved(vprev, vnext);
+        if ( sd->granularity == 1 )
+            unit_context_saved(sd);
+    }
 
     if ( is_idle_vcpu(vprev) && vprev != vnext )
         vprev->sched_unit = sd->sched_unit_idle;
