@@ -348,6 +348,7 @@ static s_time_t lock_profile_start;
 static struct lock_profile_anc *lock_profile_ancs;
 static struct lock_profile_qhead lock_profile_glb_q;
 static spinlock_t lock_profile_lock = SPIN_LOCK_UNLOCKED;
+static const char *lock_profile_nofunc = __PRETTY_FUNCTION__;
 
 static void spinlock_profile_iterate(lock_profile_subfunc *sub, void *par)
 {
@@ -371,8 +372,10 @@ static void spinlock_profile_print_elem(struct lock_profile *data,
     printk("%s ", type);
     if ( idx != LOCKPROF_IDX_NONE )
         printk("%d ", idx);
-    printk("%s: addr=%p, lockval=%08x, ", data->name, lock,
-           lock->tickets.head_tail);
+    printk("%s", data->name);
+    if ( data->func && strcmp(data->func, lock_profile_nofunc) )
+        printk("@%s", data->func);
+    printk(": addr=%p, lockval=%08x, ", lock, lock->tickets.head_tail);
     if ( lock->debug.cpu == SPINLOCK_NO_CPU )
         printk("not locked\n");
     else
@@ -427,7 +430,14 @@ static void spinlock_profile_ucopy_elem(struct lock_profile *data,
 
     if ( p->pc->nr_elem < p->pc->max_elem )
     {
-        safe_strcpy(elem.name, data->name);
+        if ( data->func && strcmp(data->func, lock_profile_nofunc) )
+        {
+            snprintf(elem.name, sizeof(elem.name), "%s@%s", data->name,
+                     data->func);
+            elem.name[sizeof(elem.name) - 1] = 0;
+        }
+        else
+            safe_strcpy(elem.name, data->name);
         safe_strcpy(elem.type, type);
         elem.idx = idx;
         elem.lock_cnt = data->lock_cnt;

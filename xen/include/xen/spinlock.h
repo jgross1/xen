@@ -78,6 +78,7 @@ struct spinlock;
 struct lock_profile {
     struct lock_profile *next;       /* forward link */
     char                *name;       /* lock name */
+    const char          *func;       /* function name */
     struct spinlock     *lock;       /* the lock itself */
     u64                 lock_cnt;    /* # of complete locking ops */
     u64                 block_cnt;   /* # of complete wait for lock */
@@ -92,7 +93,8 @@ struct lock_profile_qhead {
     int32_t                   idx;     /* index for printout */
 };
 
-#define _LOCK_PROFILE(name) { 0, #name, &name, 0, 0, 0, 0, 0 }
+#define _LOCK_PROFILE(name) { 0, #name, __PRETTY_FUNCTION__, &name,           \
+                              0, 0, 0, 0, 0 }
 #define _LOCK_PROFILE_PTR(name)                                               \
     static struct lock_profile * const __lock_profile_##name                  \
     __used_section(".lockprofile.data") =                                     \
