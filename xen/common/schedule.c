@@ -1926,6 +1926,7 @@ static void sched_switch_units(struct sched_resource *sd,
 
         ASSERT(!next->is_running);
         next->is_running = 1;
+        next->state_entry_time = now;
 
         if ( is_idle_unit(prev) )
         {
