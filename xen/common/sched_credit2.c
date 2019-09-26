@@ -464,6 +464,7 @@ custom_param("credit2_runqueue", parse_credit2_runqueue);
  */
 struct csched2_runqueue_data {
     spinlock_t lock;           /* Lock for this runqueue                     */
+    struct lock_profile_qhead profile_head;
 
     struct list_head runq;     /* Ordered list of runnable vms               */
     unsigned int nr_cpus;      /* How many CPUs are sharing this runqueue    */
@@ -813,7 +814,6 @@ static void activate_runqueue(struct csched2_private *prv, int rqi)
     rqd->id = rqi;
     INIT_LIST_HEAD(&rqd->svc);
     INIT_LIST_HEAD(&rqd->runq);
-    spin_lock_init(&rqd->lock);
 
     __cpumask_set_cpu(rqi, &prv->active_queues);
 }
@@ -4057,7 +4057,11 @@ csched2_init(struct scheduler *ops)
         return -ENOMEM;
     }
     for ( i = 0; i < nr_cpu_ids; i++ )
+    {
         prv->rqd[i].id = -1;
+        lock_profile_register_struct(prv->rqd + i, i, "credit2-runq");
+        spin_lock_init_prof(prv->rqd + i, lock);
+    }
 
     /* initialize ratelimit */
     prv->ratelimit_us = sched_ratelimit_us;

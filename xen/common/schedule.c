@@ -790,6 +790,8 @@ static void vcpu_sleep_nosync_locked(struct vcpu *v)
 
     ASSERT(spin_is_locked(get_sched_res(v->processor)->schedule_lock));
 
+    debugtrace_printk("vcpu_sleep_nosync_locked for %pv by %pv\n", v, current);
+
     if ( likely(!vcpu_runnable(v)) )
     {
         if ( v->runstate.state == RUNSTATE_runnable )
@@ -843,6 +845,8 @@ void vcpu_wake(struct vcpu *v)
     TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
 
     rcu_read_lock(&sched_res_rculock);
+
+    debugtrace_printk("vcpu_wake for %pv by %pv\n", v, current);
 
     lock = unit_schedule_lock_irqsave(unit, &flags);
 
@@ -955,6 +959,9 @@ static void sched_unit_migrate_start(struct sched_unit *unit)
 {
     struct vcpu *v;
 
+    debugtrace_printk("sched_unit_migrate_start %pv by %pv\n", unit->vcpu_list,
+                      current);
+
     for_each_sched_unit_vcpu ( unit, v )
     {
         set_bit(_VPF_migrating, &v->pause_flags);
@@ -969,6 +976,9 @@ static void sched_unit_migrate_finish(struct sched_unit *unit)
     spinlock_t *old_lock, *new_lock;
     bool_t pick_called = 0;
     struct vcpu *v;
+
+    debugtrace_printk("sched_unit_migrate_finish %pv by %pv\n",
+                      unit->vcpu_list, current);
 
     /*
      * If the unit is currently running, this will be handled by
@@ -1893,6 +1903,9 @@ static void sched_switch_units(struct sched_resource *sr,
 
     ASSERT(unit_running(prev));
 
+    debugtrace_printk("sched_switch_units %pv->%pv\n", prev->vcpu_list,
+                      next->vcpu_list);
+
     if ( prev != next )
     {
         sr->curr = next;
@@ -2011,6 +2024,8 @@ static struct sched_unit *do_schedule(struct sched_unit *prev, s_time_t now,
 
 static void vcpu_context_saved(struct vcpu *vprev, struct vcpu *vnext)
 {
+    debugtrace_printk("vcpu_context_saved %pv->%pv\n", vprev, vnext);
+
     /* Clear running flag /after/ writing context to memory. */
     smp_wmb();
 
@@ -2021,6 +2036,8 @@ static void vcpu_context_saved(struct vcpu *vprev, struct vcpu *vnext)
 static void unit_context_saved(struct sched_resource *sr)
 {
     struct sched_unit *unit = sr->prev;
+
+    debugtrace_printk("unit_context_saved prev=%p\n", unit);
 
     if ( !unit )
         return;
@@ -2086,11 +2103,16 @@ void sched_context_switched(struct vcpu *vprev, struct vcpu *vnext)
         vprev->sched_unit = sr->sched_unit_idle;
 
     rcu_read_unlock(&sched_res_rculock);
+
+    debugtrace_printk("sched_context_switched on %u\n", smp_processor_id());
 }
 
 static void sched_context_switch(struct vcpu *vprev, struct vcpu *vnext,
                                  bool reset_idle_unit, s_time_t now)
 {
+    debugtrace_printk("sched_context_switch: %pv->%pv on %u\n", vprev, vnext,
+                      smp_processor_id());
+
     if ( unlikely(vprev == vnext) )
     {
         TRACE_4D(TRC_SCHED_SWITCH_INFCONT,
@@ -2142,6 +2164,8 @@ static struct vcpu *sched_force_context_switch(struct vcpu *vprev,
                                                unsigned int cpu, s_time_t now)
 {
     v->force_context_switch = false;
+
+    debugtrace_printk("sched_force_context_switch %pv\n", vprev);
 
     if ( vcpu_runnable(v) == v->is_running )
         return NULL;
@@ -2206,6 +2230,9 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
     struct vcpu *v;
     unsigned int gran = get_sched_res(cpu)->granularity;
 
+    debugtrace_printk("sched_wait_rendezvous_in %pv cnt %u\n", prev->vcpu_list,
+                      prev->rendezvous_in_cnt);
+
     if ( !--prev->rendezvous_in_cnt )
     {
         next = do_schedule(prev, now, cpu);
@@ -2230,6 +2257,9 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
 
                 pcpu_schedule_unlock_irq(*lock, cpu);
 
+                debugtrace_printk("sched_wait_rendezvous_in force cnt %u\n",
+                                  prev->rendezvous_in_cnt);
+
                 sched_context_switch(vprev, v, false, now);
             }
 
@@ -2251,6 +2281,9 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
 
             pcpu_schedule_unlock_irq(*lock, cpu);
 
+            debugtrace_printk("sched_wait_rendezvous_in tasklet cnt %u\n",
+                              prev->rendezvous_in_cnt);
+
             raise_softirq(SCHED_SLAVE_SOFTIRQ);
             sched_context_switch(vprev, vprev, false, now);
 
@@ -2268,8 +2301,12 @@ static struct sched_unit *sched_wait_rendezvous_in(struct sched_unit *prev,
             ASSERT(is_idle_unit(prev));
             atomic_set(&prev->next_task->rendezvous_out_cnt, 0);
             prev->rendezvous_in_cnt = 0;
+
+            debugtrace_printk("sched_wait_rendezvous_in inactive\n");
         }
     }
+
+    debugtrace_printk("sched_wait_rendezvous_in out\n");
 
     return prev->next_task;
 }
@@ -2290,6 +2327,8 @@ static void sched_slave(void)
     lock = pcpu_schedule_lock_irq(cpu);
 
     now = NOW();
+
+    debugtrace_printk("sched_slave: %pv on %u\n", vprev, cpu);
 
     v = unit2vcpu_cpu(prev, cpu);
     if ( v && v->force_context_switch )
@@ -2392,6 +2431,8 @@ static void schedule(void)
         next = do_schedule(prev, now, cpu);
         atomic_set(&next->rendezvous_out_cnt, 0);
     }
+
+    debugtrace_printk("schedule: %pv on %u\n", vprev, cpu);
 
     pcpu_schedule_unlock_irq(lock, cpu);
 
@@ -2630,16 +2671,20 @@ static void schedule_dummy(void)
 
 void scheduler_disable(void)
 {
+    debugtrace_printk("scheduler_disable\n");
     scheduler_active = false;
     open_softirq(SCHEDULE_SOFTIRQ, schedule_dummy);
     open_softirq(SCHED_SLAVE_SOFTIRQ, schedule_dummy);
+    debugtrace_printk("scheduler_disable done\n");
 }
 
 void scheduler_enable(void)
 {
+    debugtrace_printk("scheduler_enable\n");
     open_softirq(SCHEDULE_SOFTIRQ, schedule);
     open_softirq(SCHED_SLAVE_SOFTIRQ, sched_slave);
     scheduler_active = true;
+    debugtrace_printk("scheduler_enable done\n");
 }
 
 /* Initialise the data structures. */
