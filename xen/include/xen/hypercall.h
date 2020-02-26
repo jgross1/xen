@@ -150,6 +150,14 @@ do_dm_op(
     unsigned int nr_bufs,
     XEN_GUEST_HANDLE_PARAM(xen_dm_op_buf_t) bufs);
 
+extern long
+do_hypfs_op(
+    unsigned int cmd,
+    XEN_GUEST_HANDLE_PARAM(const_char) arg1,
+    unsigned long arg2,
+    XEN_GUEST_HANDLE_PARAM(void) arg3,
+    unsigned long arg4);
+
 #ifdef CONFIG_COMPAT
 
 extern int
