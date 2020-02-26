@@ -27,16 +27,14 @@ struct kernel_param {
 };
 
 struct param_hypfs {
-    const struct kernel_param *param;
     struct hypfs_entry_leaf hypfs;
     void (*init_leaf)(struct param_hypfs *par);
+    int (*func)(const char *);
 };
 
 extern const struct kernel_param __setup_start[], __setup_end[];
-extern const struct kernel_param __param_start[], __param_end[];
 extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
 
-#define __dataparam       __used_section(".data.param")
 #define __paramhypfs      __used_section(".data.paramhypfs")
 
 #define __param(att)      static const att \
@@ -87,7 +85,6 @@ extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
         { .name = setup_str_ign,            \
           .type = OPT_IGNORE }
 
-#define __rtparam         __param(__dataparam)
 #define __paramfs         static __paramhypfs \
     __attribute__((__aligned__(sizeof(void *)))) struct param_hypfs
 
@@ -99,28 +96,17 @@ extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
 
 /* initfunc needs to set size and content, e.g. via custom_runtime_set_var(). */
 #define custom_runtime_only_param(_name, _var, initfunc) \
-    __rtparam __rtpar_##_var = \
-      { .name = _name, \
-          .type = OPT_CUSTOM, \
-          .par.func = _var }; \
     __paramfs __parfs_##_var = \
-        { .param = &__rtpar_##_var, \
-          .init_leaf = initfunc, \
-          .hypfs.e.type = XEN_HYPFS_TYPE_STRING, \
+        { .hypfs.e.type = XEN_HYPFS_TYPE_STRING, \
           .hypfs.e.encoding = XEN_HYPFS_ENC_PLAIN, \
           .hypfs.e.name = _name, \
           .hypfs.e.read = hypfs_read_leaf, \
-          .hypfs.e.write = hypfs_write_custom }
+          .hypfs.e.write = hypfs_write_custom, \
+          .init_leaf = initfunc, \
+          .func = _var }
 #define boolean_runtime_only_param(_name, _var) \
-    __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_BOOL, \
-          .len = sizeof(_var) + \
-                 BUILD_BUG_ON_ZERO(sizeof(_var) != sizeof(bool)), \
-          .par.var = &_var }; \
     __paramfs __parfs_##_var = \
-        { .param = &__rtpar_##_var, \
-          .hypfs.e.type = XEN_HYPFS_TYPE_BOOL, \
+        { .hypfs.e.type = XEN_HYPFS_TYPE_BOOL, \
           .hypfs.e.encoding = XEN_HYPFS_ENC_PLAIN, \
           .hypfs.e.name = _name, \
           .hypfs.e.size = sizeof(_var), \
@@ -128,14 +114,8 @@ extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
           .hypfs.e.write = hypfs_write_bool, \
           .hypfs.content = &_var }
 #define integer_runtime_only_param(_name, _var) \
-    __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_UINT, \
-          .len = sizeof(_var), \
-          .par.var = &_var }; \
     __paramfs __parfs_##_var = \
-        { .param = &__rtpar_##_var, \
-          .hypfs.e.type = XEN_HYPFS_TYPE_UINT, \
+        { .hypfs.e.type = XEN_HYPFS_TYPE_UINT, \
           .hypfs.e.encoding = XEN_HYPFS_ENC_PLAIN, \
           .hypfs.e.name = _name, \
           .hypfs.e.size = sizeof(_var), \
@@ -143,14 +123,8 @@ extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
           .hypfs.e.write = hypfs_write_leaf, \
           .hypfs.content = &_var }
 #define size_runtime_only_param(_name, _var) \
-    __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_SIZE, \
-          .len = sizeof(_var), \
-          .par.var = &_var }; \
     __paramfs __parfs_##_var = \
-        { .param = &__rtpar_##_var, \
-          .hypfs.e.type = XEN_HYPFS_TYPE_UINT, \
+        { .hypfs.e.type = XEN_HYPFS_TYPE_UINT, \
           .hypfs.e.encoding = XEN_HYPFS_ENC_PLAIN, \
           .hypfs.e.name = _name, \
           .hypfs.e.size = sizeof(_var), \
@@ -158,14 +132,8 @@ extern struct param_hypfs __paramhypfs_start[], __paramhypfs_end[];
           .hypfs.e.write = hypfs_write_leaf, \
           .hypfs.content = &_var }
 #define string_runtime_only_param(_name, _var) \
-    __rtparam __rtpar_##_var = \
-        { .name = _name, \
-          .type = OPT_STR, \
-          .len = sizeof(_var), \
-          .par.var = &_var }; \
     __paramfs __parfs_##_var = \
-        { .param = &__rtpar_##_var, \
-          .hypfs.e.type = XEN_HYPFS_TYPE_STRING, \
+        { .hypfs.e.type = XEN_HYPFS_TYPE_STRING, \
           .hypfs.e.encoding = XEN_HYPFS_ENC_PLAIN, \
           .hypfs.e.name = _name, \
           .hypfs.e.size = sizeof(_var), \

@@ -101,7 +101,5 @@ int hypfs_write_bool(struct hypfs_entry_leaf *leaf,
                      XEN_GUEST_HANDLE_PARAM(void) uaddr, unsigned long ulen);
 int hypfs_write_custom(struct hypfs_entry_leaf *leaf,
                        XEN_GUEST_HANDLE_PARAM(void) uaddr, unsigned long ulen);
-void hypfs_write_lock(void);
-void hypfs_write_unlock(void);
 
 #endif /* __XEN_HYPFS_H__ */

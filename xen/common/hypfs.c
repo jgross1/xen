@@ -302,7 +302,7 @@ int hypfs_write_custom(struct hypfs_entry_leaf *leaf,
         goto out;
 
     p = container_of(leaf, struct param_hypfs, hypfs);
-    ret = p->param->par.func(buf);
+    ret = p->func(buf);
 
  out:
     xfree(buf);
@@ -374,14 +374,4 @@ long do_hypfs_op(unsigned int cmd,
         read_unlock(&hypfs_lock);
 
     return ret;
-}
-
-void hypfs_write_lock(void)
-{
-    write_lock(&hypfs_lock);
-}
-
-void hypfs_write_unlock(void)
-{
-    write_unlock(&hypfs_lock);
 }
