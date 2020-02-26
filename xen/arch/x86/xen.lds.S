@@ -279,6 +279,11 @@ SECTIONS
        __start_schedulers_array = .;
        *(.data.schedulers)
        __end_schedulers_array = .;
+
+       . = ALIGN(8);
+       __paramhypfs_start = .;
+       *(.data.paramhypfs)
+       __paramhypfs_end = .;
   } :text
 
   DECL_SECTION(.data) {

@@ -10,6 +10,7 @@
 #include <xen/hypercall.h>
 #include <xen/hypfs.h>
 #include <xen/lib.h>
+#include <xen/param.h>
 #include <xen/rwlock.h>
 #include <public/hypfs.h>
 
@@ -281,6 +282,33 @@ int hypfs_write_bool(struct hypfs_entry_leaf *leaf,
     return 0;
 }
 
+int hypfs_write_custom(struct hypfs_entry_leaf *leaf,
+                       XEN_GUEST_HANDLE_PARAM(void) uaddr, unsigned long ulen)
+{
+    struct param_hypfs *p;
+    char *buf;
+    int ret;
+
+    buf = xzalloc_array(char, ulen);
+    if ( !buf )
+        return -ENOMEM;
+
+    ret = -EFAULT;
+    if ( copy_from_guest(buf, uaddr, ulen) )
+        goto out;
+
+    ret = -EDOM;
+    if ( !memchr(buf, 0, ulen) )
+        goto out;
+
+    p = container_of(leaf, struct param_hypfs, hypfs);
+    ret = p->param->par.func(buf);
+
+ out:
+    xfree(buf);
+    return ret;
+}
+
 static int hypfs_write(struct hypfs_entry *entry,
                        XEN_GUEST_HANDLE_PARAM(void) uaddr, unsigned long ulen)
 {
@@ -346,4 +374,14 @@ long do_hypfs_op(unsigned int cmd,
         read_unlock(&hypfs_lock);
 
     return ret;
+}
+
+void hypfs_write_lock(void)
+{
+    write_lock(&hypfs_lock);
+}
+
+void hypfs_write_unlock(void)
+{
+    write_unlock(&hypfs_lock);
 }

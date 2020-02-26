@@ -75,12 +75,36 @@ enum con_timestamp_mode
     TSM_DATE_MS,       /* [YYYY-MM-DD HH:MM:SS.mmm] */
     TSM_BOOT,          /* [SSSSSS.uuuuuu] */
     TSM_RAW,           /* [XXXXXXXXXXXXXXXX] */
+    TSM_END
+};
+
+static const char *con_timestamp_mode_2_string[TSM_END] = {
+    [TSM_NONE] = "none",
+    [TSM_DATE] = "date",
+    [TSM_DATE_MS] = "datems",
+    [TSM_BOOT] = "boot",
+    [TSM_RAW] = "raw"
 };
 
 static enum con_timestamp_mode __read_mostly opt_con_timestamp_mode = TSM_NONE;
+static char con_timestamp_mode_val[7];
+
+static void update_con_timestamp_mode(void)
+{
+    strlcpy(con_timestamp_mode_val,
+            con_timestamp_mode_2_string[opt_con_timestamp_mode],
+            sizeof(con_timestamp_mode_val));
+}
+
+static void __init con_timestamp_mode_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, con_timestamp_mode_val);
+    update_con_timestamp_mode();
+}
 
 static int parse_console_timestamps(const char *s);
-custom_runtime_param("console_timestamps", parse_console_timestamps);
+custom_runtime_param("console_timestamps", parse_console_timestamps,
+                     con_timestamp_mode_init);
 
 /* conring_size: allows a large console ring than default (16kB). */
 static uint32_t __initdata opt_conring_size;
@@ -133,15 +157,38 @@ static DEFINE_SPINLOCK(console_lock);
 #define XENLOG_DEFAULT       1 /* XENLOG_WARNING */
 #define XENLOG_GUEST_DEFAULT 1 /* XENLOG_WARNING */
 
+#define LOGLVL_VAL_SZ 16
 static int __read_mostly xenlog_upper_thresh = XENLOG_UPPER_THRESHOLD;
 static int __read_mostly xenlog_lower_thresh = XENLOG_LOWER_THRESHOLD;
+static char xenlog_val[LOGLVL_VAL_SZ];
 static int __read_mostly xenlog_guest_upper_thresh =
     XENLOG_GUEST_UPPER_THRESHOLD;
 static int __read_mostly xenlog_guest_lower_thresh =
     XENLOG_GUEST_LOWER_THRESHOLD;
+static char xenlog_guest_val[LOGLVL_VAL_SZ];
 
 static int parse_loglvl(const char *s);
 static int parse_guest_loglvl(const char *s);
+
+static char *lvl2opt[] = { "none", "error", "warning", "info", "all" };
+
+static void xenlog_update_val(int lower, int upper, char *val)
+{
+    snprintf(val, LOGLVL_VAL_SZ, "%s/%s", lvl2opt[lower], lvl2opt[upper]);
+}
+
+static void __init xenlog_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, xenlog_val);
+    xenlog_update_val(xenlog_lower_thresh, xenlog_upper_thresh, xenlog_val);
+}
+
+static void __init xenlog_guest_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, xenlog_guest_val);
+    xenlog_update_val(xenlog_guest_lower_thresh, xenlog_guest_upper_thresh,
+                      xenlog_guest_val);
+}
 
 /*
  * <lvl> := none|error|warning|info|debug|all
@@ -151,8 +198,8 @@ static int parse_guest_loglvl(const char *s);
  * Similar definitions for guest_loglvl, but applies to guest tracing.
  * Defaults: loglvl=warning ; guest_loglvl=none/warning
  */
-custom_runtime_param("loglvl", parse_loglvl);
-custom_runtime_param("guest_loglvl", parse_guest_loglvl);
+custom_runtime_param("loglvl", parse_loglvl, xenlog_init);
+custom_runtime_param("guest_loglvl", parse_guest_loglvl, xenlog_guest_init);
 
 static atomic_t print_everything = ATOMIC_INIT(0);
 
@@ -173,7 +220,7 @@ static int __parse_loglvl(const char *s, const char **ps)
     return 2; /* sane fallback */
 }
 
-static int _parse_loglvl(const char *s, int *lower, int *upper)
+static int _parse_loglvl(const char *s, int *lower, int *upper, char *val)
 {
     *lower = *upper = __parse_loglvl(s, &s);
     if ( *s == '/' )
@@ -181,18 +228,21 @@ static int _parse_loglvl(const char *s, int *lower, int *upper)
     if ( *upper < *lower )
         *upper = *lower;
 
+    xenlog_update_val(*lower, *upper, val);
+
     return *s ? -EINVAL : 0;
 }
 
 static int parse_loglvl(const char *s)
 {
-    return _parse_loglvl(s, &xenlog_lower_thresh, &xenlog_upper_thresh);
+    return _parse_loglvl(s, &xenlog_lower_thresh, &xenlog_upper_thresh,
+                         xenlog_val);
 }
 
 static int parse_guest_loglvl(const char *s)
 {
     return _parse_loglvl(s, &xenlog_guest_lower_thresh,
-                         &xenlog_guest_upper_thresh);
+                         &xenlog_guest_upper_thresh, xenlog_guest_val);
 }
 
 static char *loglvl_str(int lvl)
@@ -731,9 +781,11 @@ static int parse_console_timestamps(const char *s)
     {
     case 0:
         opt_con_timestamp_mode = TSM_NONE;
+        update_con_timestamp_mode();
         return 0;
     case 1:
         opt_con_timestamp_mode = TSM_DATE;
+        update_con_timestamp_mode();
         return 0;
     }
     if ( *s == '\0' || /* Compat for old booleanparam() */
@@ -749,6 +801,8 @@ static int parse_console_timestamps(const char *s)
         opt_con_timestamp_mode = TSM_NONE;
     else
         return -EINVAL;
+
+    update_con_timestamp_mode();
 
     return 0;
 }

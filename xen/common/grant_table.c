@@ -85,8 +85,10 @@ struct grant_table {
     struct grant_table_arch arch;
 };
 
-static int parse_gnttab_limit(const char *param, const char *arg,
-                              unsigned int *valp)
+#define GRANT_CUSTOM_VAL_SZ  12
+
+static int parse_gnttab_limit(const char *arg, unsigned int *valp,
+                              char *parval)
 {
     const char *e;
     unsigned long val;
@@ -99,28 +101,47 @@ static int parse_gnttab_limit(const char *param, const char *arg,
         return -ERANGE;
 
     *valp = val;
+    snprintf(parval, GRANT_CUSTOM_VAL_SZ, "%lu", val);
 
     return 0;
 }
 
 unsigned int __read_mostly opt_max_grant_frames = 64;
+static char __read_mostly opt_max_grant_frames_val[GRANT_CUSTOM_VAL_SZ];
+
+static void __init gnttab_max_frames_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, opt_max_grant_frames_val);
+    snprintf(opt_max_grant_frames_val, GRANT_CUSTOM_VAL_SZ, "%u",
+             opt_max_grant_frames);
+}
 
 static int parse_gnttab_max_frames(const char *arg)
 {
-    return parse_gnttab_limit("gnttab_max_frames", arg,
-                              &opt_max_grant_frames);
+    return parse_gnttab_limit(arg, &opt_max_grant_frames,
+                              opt_max_grant_frames_val);
 }
-custom_runtime_param("gnttab_max_frames", parse_gnttab_max_frames);
+custom_runtime_param("gnttab_max_frames", parse_gnttab_max_frames,
+                     gnttab_max_frames_init);
 
 static unsigned int __read_mostly opt_max_maptrack_frames = 1024;
+static char __read_mostly opt_max_maptrack_frames_val[GRANT_CUSTOM_VAL_SZ];
+
+static void __init max_maptrack_frames_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, opt_max_maptrack_frames_val);
+    snprintf(opt_max_maptrack_frames_val, GRANT_CUSTOM_VAL_SZ, "%u",
+             opt_max_maptrack_frames);
+}
 
 static int parse_gnttab_max_maptrack_frames(const char *arg)
 {
-    return parse_gnttab_limit("gnttab_max_maptrack_frames", arg,
-                              &opt_max_maptrack_frames);
+    return parse_gnttab_limit(arg, &opt_max_maptrack_frames,
+                              opt_max_maptrack_frames_val);
 }
 custom_runtime_param("gnttab_max_maptrack_frames",
-                     parse_gnttab_max_maptrack_frames);
+                     parse_gnttab_max_maptrack_frames,
+                     max_maptrack_frames_init);
 
 #ifndef GNTTAB_MAX_VERSION
 #define GNTTAB_MAX_VERSION 2

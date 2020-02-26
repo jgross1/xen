@@ -20,8 +20,27 @@ static __read_mostly enum {
     PCID_OFF,
     PCID_ALL,
     PCID_XPTI,
-    PCID_NOXPTI
+    PCID_NOXPTI,
+    PCID_END
 } opt_pcid = PCID_XPTI;
+static const char *opt_pcid_2_string[PCID_END] = {
+    [PCID_OFF] = "off",
+    [PCID_ALL] = "on",
+    [PCID_XPTI] = "xpti",
+    [PCID_NOXPTI] = "noxpti"
+};
+static char opt_pcid_val[7];
+
+static void update_opt_pcid(void)
+{
+    strlcpy(opt_pcid_val, opt_pcid_2_string[opt_pcid], sizeof(opt_pcid_val));
+}
+
+static void __init opt_pcid_init(struct param_hypfs *par)
+{
+    custom_runtime_set_var(par, opt_pcid_val);
+    update_opt_pcid();
+}
 
 static int parse_pcid(const char *s)
 {
@@ -55,9 +74,12 @@ static int parse_pcid(const char *s)
         break;
     }
 
+    if ( !rc )
+        update_opt_pcid();
+
     return rc;
 }
-custom_runtime_param("pcid", parse_pcid);
+custom_runtime_param("pcid", parse_pcid, opt_pcid_init);
 
 static void noreturn continue_nonidle_domain(struct vcpu *v)
 {
