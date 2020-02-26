@@ -353,6 +353,16 @@ config DOM0_MEM
 
 	  Leave empty if you are not sure what to specify.
 
+config HYPFS_CONFIG
+	bool "Provide hypervisor .config via hypfs entry"
+	default y
+	---help---
+	  When enabled the contents of the .config file used to build the
+	  hypervisor are provided via the hypfs entry /buildinfo/config.
+
+	  Disable this option in case you want to spare some memory or you
+	  want to hide the .config contents from dom0.
+
 config TRACEBUFFER
 	bool "Enable tracing infrastructure" if EXPERT = "y"
 	default y
